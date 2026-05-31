@@ -23,3 +23,15 @@ case class Waveforms() extends Bundle {
   val pwm    = SInt(16 bits)
   val tri    = SInt(16 bits)
 }
+
+// Unified configuration bundle sent from Register Bank to the Envelope Generator
+case class EnvelopeConfig() extends Bundle {
+  val ctrl        = Bits(8 bits)
+  val attack      = UInt(8 bits)
+  val decay       = UInt(8 bits)
+  val sustain     = UInt(8 bits)
+  val release     = UInt(8 bits)
+  val syncCtrl    = Bits(8 bits)
+  val phaseOffset = UInt(8 bits)
+}
+
