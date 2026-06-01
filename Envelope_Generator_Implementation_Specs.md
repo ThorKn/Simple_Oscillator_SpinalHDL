@@ -33,18 +33,20 @@ spinalSynth/
 │   │   └── scala/
 │   │       └── synth/
 │   │           ├── common/
-│   │           │   └── Types.scala         # Add EnvelopeConfig bundle and Register addresses
-│   │           ├── envelope/               # [NEW] Envelope generator package
+│   │           │   └── Types.scala               # Add EnvelopeConfig bundle and Register addresses
+│   │           ├── envelope/                     # [NEW] Envelope generator package
 │   │           │   ├── EnvelopeGenerator.scala   # Top-level integration & ports
 │   │           │   ├── EnvelopeCtrl.scala        # State machine & LUT ROM
-│   │           │   ├── EnvelopeAccumulator.scala # 32-bit phase accumulator
+│   │           │   ├── EnvelopeAccumulator.scala # 32-bit accumulator
 │   │           │   └── EnvelopeShaper.scala      # 257-entry ROM curves & interpolator
 │   └── test/
 │       └── scala/
 │           └── synth/
-│               └── envelope/               # [NEW] Envelope simulation tests
-│                   └── EnvelopeSim.scala   # SpinalSim testbench for ADSR, modes & curves
-```
+│               └── envelope/                         # [NEW] Envelope simulation tests
+│                   ├── EnvelopeCtrlSim.scala         # Control FSM unit test
+│                   ├── EnvelopeAccumulatorSim.scala  # Phase accumulator unit test
+│                   ├── EnvelopeShaperSim.scala       # Wave shaper unit test
+│                   └── EnvelopeGeneratorSim.scala    # Integration test```
 
 ---
 
@@ -211,18 +213,18 @@ class EnvelopeAccumulator extends Component {
 ```
 
 ### Counter & Overflow Behavior
-* **Accumulator register:** `val phase = Reg(UInt(32 bits)) init(0)`
+* **Accumulator register:** `val accum = Reg(UInt(32 bits)) init(0)`
 * **Accumulation Logic:**
-  * If `io.resetAccum` is asserted, reset `phase := 0`.
+  * If `io.resetAccum` is asserted, reset `accum := 0`.
   * If `io.runAccum` is High:
-    * If `io.accumDir` is Forward (`False`), `phase := phase + io.phaseInc`.
-    * If `io.accumDir` is Reverse (`True`), `phase := phase - io.phaseInc`.
+    * If `io.accumDir` is Forward (`False`), `accum := accum + io.phaseInc`.
+    * If `io.accumDir` is Reverse (`True`), `accum := accum - io.phaseInc`.
 * **Output Splitting:**
-  * `io.baseIndex := phase(31 downto 24)`
-  * `io.fraction  := phase(23 downto 22)`
+  * `io.baseIndex := accum(31 downto 24)`
+  * `io.fraction  := accum(23 downto 22)`
 * **Segment Boundaries & Done Detection:**
-  * In **Forward Mode**, completion is hit when the phase register overflows (wraps past 32-bit maximum).
-  * In **Reverse Mode**, completion is hit when the phase register underflows (wraps past 0).
+  * In **Forward Mode**, completion is hit when the accum register overflows (wraps past 32-bit maximum).
+  * In **Reverse Mode**, completion is hit when the accum register underflows (wraps past 0).
   * `io.segmentDone := (Forward && overflow) || (Reverse && underflow)`
 
 ---
@@ -230,7 +232,7 @@ class EnvelopeAccumulator extends Component {
 ## 5. EnvelopeShaper
 
 ### Purpose
-The `EnvelopeShaper` transforms the raw, linear accumulator phase into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
+The `EnvelopeShaper` transforms the raw, linear accumulator output into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
 
 ### IO Bundle
 ```scala
@@ -340,14 +342,14 @@ This path synchronizes asynchronous external controls and propagates internal re
 * **External Sync Input (`syncIn`):** Connects to a standard 2-stage flip-flop synchronizer clocked at 24 MHz to prevent metastability.
   * *Latency:* **2 clock cycles** (synchronization penalty).
 * **Register Settings (`config`):** Synchronous from the `RegisterBank`.
-* **State Updates:** The FSM processes inputs combinationally and issues `resetAccum` or `runAccum` control registers to the phase accumulator on the next cycle.
+* **State Updates:** The FSM processes inputs combinationally and issues `resetAccum` or `runAccum` control registers to the accumulator on the next cycle.
   * *Total Control Latency:* **3 clock cycles** for `syncIn`, **1 clock cycle** for register-driven gate triggers.
 
 ---
 
 ### 6.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
 This is the core mathematical flow designed to maintain a 24 MHz clock cycle bound through registered cells:
-* **T0 (Accumulation Stage):** The 32-bit register `phase` increments by `phaseInc`. The split base index and fraction bits are output stable.
+* **T0 (Accumulation Stage):** The 32-bit register `accum` increments by `phaseInc`. The split base index and fraction bits are output stable.
 * **T1 (ROM Lookup Stage):** The 8-bit index addresses the dual boundary ports `LUT[x]` and `LUT[x+1]`. The memory array lookup requires **1 clock cycle** to fetch and settle output registers.
 * **T2 (Arithmetic Stage):** The combinational multiplexed shift-add interpolator evaluates `Y = Y0 + (f/4) * delta_Y` instantly.
 * **T3 (Output Stage):** To isolate critical routing paths, the final unipolar and bipolar amplitude values are registered to the physical output ports and qualified with `phaseTick`.
@@ -356,7 +358,7 @@ This is the core mathematical flow designed to maintain a 24 MHz clock cycle bou
 ---
 
 ### 6.3 Chain 3: Sustain Stage Delay Matching (`sustain` -> Output Clamping)
-During the `SUSTAIN` state, the envelope holds its output at the static sustain value rather than accumulating phase.
+During the `SUSTAIN` state, the envelope holds its output at the static sustain value rather than accumulating with the phaseInc.
 * **The Early Transition Problem:** Because the math pipeline has a **3-cycle latency**, if the FSM immediately switches the output to the static `sustainLevel` value upon entering the `SUSTAIN` state, the output port will jump to the sustain value **3 cycles too early**, truncating the final decay data points still traversing the pipeline!
 * **The Solution (Delay Matching):** The active state indicators (like `activeStage` and FSM state controls) are routed through a **3-stage shift register pipeline** (`Stage_Delay`) inside the Shaper. This delays the sustain clamping multiplexer switch by exactly **3 cycles**, matching the lookup pipeline latency and ensuring a perfectly seamless, glitch-free decay-to-sustain transition.
 

@@ -97,16 +97,14 @@ The system operates within a single clock domain managed at the top level:
 
 ```
 val io = new Bundle {
-    val clk        = in Bool()
-    val reset      = in Bool()
+    val clk24MHz = in Bool()
+    val reset    = in Bool()
 
-    val freqWord   = in UInt(24 bits)
-    val waveSelect = in UInt(3 bits)
-    val pwmWidth   = in UInt(8 bits)
+    val uartRx   = in Bool()
 
-    val i2s_bclk   = out Bool()
-    val i2s_lrclk  = out Bool()
-    val i2s_sdata  = out Bool()
+    val i2sBclk  = out Bool()
+    val i2sLrclk = out Bool()
+    val i2sData  = out Bool()
 }
 ```
 

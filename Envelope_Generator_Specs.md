@@ -197,7 +197,7 @@ At the 24 MHz main clock rate with a 32-bit accumulator and 22-bit phase increme
 
 ### Hardware Phase Specifications
 * **Accumulator Size:** Uses a 32-bit phase accumulator (10 bits integer + 22 bits fraction).
-* **Segment Limits:** When the phase sweeps to its terminal value (overflow, depending on direction), the module asserts the `segmentComplete` flag back to `EnvelopeCtrl` to prompt state transitions.
+* **Segment Limits:** When the phase sweeps to its terminal value (overflow, depending on direction), the module asserts the `segmentDone` flag back to `EnvelopeCtrl` to prompt state transitions.
 * **Output Splitting:** Splits the upper 10 integer bits of the active 32-bit phase (bits 31 to 22) into two fields to drive the waveshaper:
   * **Base Index:** The higher 8 bits of the integer part (bits 31 to 24), representing the active step index (0 to 255).
   * **Fractional Part:** The lower 2 bits of the integer part (bits 23 to 22), representing the interpolation fraction (0 to 3).

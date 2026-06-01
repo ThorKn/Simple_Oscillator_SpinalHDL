@@ -91,22 +91,24 @@ Verifies the 32-bit register accumulator, phase counting direction, split output
 #### Test Cases
 
 ##### 1.2.1 Reset Defaults
-* **Action**: Assert active-high `reset` for 5 clock cycles while driving arbitrary inputs on `runAccum = True`, `accumDir = True`, and `phaseInc = 0x40000000`.
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving arbitrary inputs on `runAccum = True`, `accumDir = True`, and `phaseInc = 0x200000` (valid 22-bit value).
 * **Assertion**: Verify that the internal phase register remains strictly at `0`, outputting `baseIndex = 0`, `fraction = 0`, and `segmentDone = False`.
 
 ##### 1.2.2 Phase Accumulation & Splitting Precision
-* **Action**: Drive `phaseInc = 0x10000000` ($2^{28}$). Enable the accumulator for 2 cycles.
-* **Assertion**: Verify that on each clock cycle:
-  - The accumulator increases by `0x10000000`.
-  - `io.baseIndex` increases exactly by `16` (0x10 in Hex) at each step.
-  - `io.fraction` tracks the fractional bits perfectly.
+* **Action**: Drive `phaseInc = 0x200000` ($2^{21}$). Enable the accumulator.
+* **Assertion**: Verify the splitting output precision:
+  - Cycle 1: `baseIndex = 0`, `fraction = 0`.
+  - Cycle 2: `baseIndex = 0`, `fraction = 1`.
+  - Cycle 3: `baseIndex = 0`, `fraction = 1`.
+  - Cycle 4: `baseIndex = 0`, `fraction = 2`.
+  - Also verify fraction-only tracking with `phaseInc = 0x200000` using a 2-cycle wait over 3 steps (each step increments `fraction` by exactly `1`).
 
 ##### 1.2.3 Forward Wrap Done
-* **Action**: Set `accumDir = False` (Forward), load `phaseInc = 0x40000000` ($2^{30}$). Run for 4 cycles.
-* **Assertion**: Verify that on the 4th cycle, the register overflows, asserting `segmentDone = True` for exactly 1 cycle.
+* **Action**: Set `accumDir = False` (Forward), load `phaseInc = 0x200000`. Run for 2048 cycles to wrap the 32-bit accumulator.
+* **Assertion**: Verify that on the 2048th cycle, the register overflows, asserting `segmentDone = True` for exactly 1 cycle.
 
 ##### 1.2.4 Reverse Underflow Done
-* **Action**: Assert `resetAccum = True` to clear the counter to `0`. Set `accumDir = True` (Reverse), load `phaseInc = 0x40000000`. Enable accumulator.
+* **Action**: Assert `resetAccum = True` to clear the counter to `0`. Set `accumDir = True` (Reverse), load `phaseInc = 0x200000`. Enable accumulator.
 * **Assertion**: Verify that on the very first cycle, the counter underflows past zero, asserting `segmentDone = True` instantly for 1 cycle.
 
 ---

@@ -75,7 +75,7 @@ External Interface (24MHz Clk, Reset, UART Rx)
 │  [Uart]                                       │
 │    └─ [UartRx] → [Decoder] → [RegisterBank]   │
 └───────────────┬───────────────────────────────┘
-                │ config: OscillatorConfig
+                │ config: OscillatorConfig, EnvelopeConfig
                 ↓
 ┌───────────────────────────────────────────────┐
 │  Synthesis Engine                             │
@@ -88,12 +88,22 @@ External Interface (24MHz Clk, Reset, UART Rx)
                 │ (48kHz Samples)
                 ↓
 ┌───────────────────────────────────────────────┐
+│  Modulation & Mixing ,                        │
+│                                               │
+│  [EnvelopeGenerator] (synth.envelope)         │
+│      ↓                                        │ 
+│  [Attenuator] (synth.mixing)                  │
+└───────────────┬───────────────────────────────┘
+                │ (48kHz Attenuated Samples)
+                ↓
+┌───────────────────────────────────────────────┐
 │  I2S Transmitter (synth.output)               │
 │  [BCLK] [LRCLK] [SDATA]                       │
 └───────────────────────────────────────────────┘
                 ↓
        Stereo Digital Audio
 ```
+
 
 ---
 
@@ -629,6 +639,12 @@ Synth
  │           ├── Noise
  │           └── Mux
  │
+ ├── envelope/ (Envelope Generator)
+ │     └── EnvelopeGenerator
+ │           ├── EnvelopeCtrl
+ │           ├── EnvelopeAccumulator
+ │           └── EnvelopeShaper
+ │ 
  ├── mixing/ (Audio Processing)
  │     └── Attenuator (Volume Control)
  │
