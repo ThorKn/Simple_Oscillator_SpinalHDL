@@ -88,8 +88,7 @@ External Interface (24MHz Clk, Reset, UART Rx)
                 │ (48kHz Samples)
                 ↓
 ┌───────────────────────────────────────────────┐
-│  Modulation & Mixing ,                        │
-│                                               │
+│  Modulation & Mixing                          │
 │  [EnvelopeGenerator] (synth.envelope)         │
 │      ↓                                        │ 
 │  [Attenuator] (synth.mixing)                  │

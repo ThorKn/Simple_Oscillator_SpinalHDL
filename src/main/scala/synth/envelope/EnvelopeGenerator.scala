@@ -6,17 +6,43 @@ import synth.common.EnvelopeConfig
 
 class EnvelopeGenerator extends Component {
   val io = new Bundle {
-    val phaseTick = in Bool()
-    val syncIn    = in Bool()
-    val midiClock = in Bool()
-    val config    = in(EnvelopeConfig())
-    val envelopeOut       = master(Flow(UInt(10 bits)))
-    val envelopeOutSigned = master(Flow(SInt(10 bits)))
+    // Clock Heartbeat & Sync inputs
+    val phaseTick = in Bool()                 // Heartbeat tick synced with 480 kHz audio rate
+    val syncIn    = in Bool()                 // External trigger for Hard or Soft Sync
+    val midiClock = in Bool()                 // External MIDI clock tick (24 PPQN pulse)
+    val config    = in(EnvelopeConfig())      // Packaged register configurations
+
+    // System Outputs
+    val envelopeOut       = master(Flow(UInt(10 bits))) // Unipolar output (0 to 1023)
+    val envelopeOutSigned = master(Flow(SInt(10 bits))) // Bipolar output (-512 to +511)
   }
 
-  // Default stub assignments
-  io.envelopeOut.valid       := False
-  io.envelopeOut.payload     := 0
-  io.envelopeOutSigned.valid := False
-  io.envelopeOutSigned.payload := 0
+  // Instantiate submodules
+  val ctrl        = new EnvelopeCtrl()
+  val accumulator = new EnvelopeAccumulator()
+  val shaper      = new EnvelopeShaper()
+
+  // Connecting Ctrl to Accumulator
+  accumulator.io.resetAccum   := ctrl.io.resetAccum
+  accumulator.io.runAccum     := ctrl.io.runAccum
+  accumulator.io.accumDir     := ctrl.io.accumDir
+  accumulator.io.phaseInc     := ctrl.io.phaseInc
+  ctrl.io.segmentDone         := accumulator.io.segmentDone
+
+  // Connecting Accumulator and Ctrl to Shaper
+  shaper.io.phaseTick    := io.phaseTick
+  shaper.io.baseIndex    := accumulator.io.baseIndex
+  shaper.io.fraction     := accumulator.io.fraction
+  shaper.io.curveSelect  := ctrl.io.curveSelect
+  shaper.io.sustainLevel := io.config.sustain
+  shaper.io.activeStage  := ctrl.io.activeStage
+
+  // Connecting Top-Level inputs to Ctrl
+  ctrl.io.syncIn         := io.syncIn
+  ctrl.io.midiClock      := io.midiClock
+  ctrl.io.config         := io.config
+
+  // Top-Level Outputs connected to Shaper
+  io.envelopeOut       <> shaper.io.envelopeOut
+  io.envelopeOutSigned <> shaper.io.envelopeOutSigned
 }

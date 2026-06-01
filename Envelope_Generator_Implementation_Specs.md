@@ -279,18 +279,30 @@ val y1 = UInt(8 bits)
 y0 := curveMux(io.curveSelect, io.baseIndex)
 y1 := curveMux(io.curveSelect, io.baseIndex + 1)
 
-val delta = y1.asSInt - y0.asSInt
-val interp = SInt(10 bits)
+// Safely zero-extend to 9-bit SInt to prevent signed casting MSB sign-bit bugs
+val y0Signed = y0.intoSInt
+val y1Signed = y1.intoSInt
+
+// Compute signed delta: Y1 - Y0 (10-bit signed SInt)
+val delta = y1Signed - y0Signed
+
+// interp holds (Y0 * 4 + f * delta) inside a safe 12-bit signed width to avoid overflow
+val interp = SInt(12 bits)
+
+// Pre-shifted terms for clean hardware synthesis
+val y0Shifted    = (y0Signed << 2).resize(12 bits) // Y0 * 4
+val deltaShifted = (delta << 1).resize(12 bits)   // 2 * delta
+val deltaResized = delta.resize(12 bits)
 
 switch(io.fraction) {
-  is(U"00") { interp := y0.asSInt @@ U"00" } // Y0 * 4
-  is(U"01") { interp := (y0.asSInt @@ U"00") + (delta) } // Y0 * 4 + delta
-  is(U"10") { interp := (y0.asSInt @@ U"00") + (delta << 1) } // Y0 * 4 + 2 * delta
-  is(U"11") { interp := (y0.asSInt @@ U"00") + (delta << 1) + delta } // Y0 * 4 + 3 * delta
+  is(0) { interp := y0Shifted }
+  is(1) { interp := y0Shifted + deltaResized }
+  is(2) { interp := y0Shifted + deltaShifted }
+  is(3) { interp := y0Shifted + deltaShifted + deltaResized }
 }
 
-// Resulting Y is scaled back from 10-bit math down to the unipolar 10-bit range
-val finalValUnipolar = (interp >> 2).asUInt
+// Convert to 10-bit unsigned unipolar output (0 to 1023)
+val finalValUnipolar = interp.asUInt.resize(10 bits)
 ```
 
 #### Parallel Bipolar Output Flow:
