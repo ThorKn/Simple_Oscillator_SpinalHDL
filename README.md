@@ -482,7 +482,7 @@ The following registers are mapped into the `spinalSynth` SPI/UART register bus 
 
 | Register Address (Hex) | Register Name | Bit Width | Description |
 | :--- | :--- | :---: | :--- |
-| `0x40` | `ENV_CTRL` | 8 bits | Control bits: `[0]` Enable, `[1]` Gate, `[2]` Loop, `[3]` Ping-Pong, `[4]` Reverse, `[6:5]` Curve Model (`00`=Lin, `01`=Exp, `10`=Log, `11`=S-Curve) |
+| `0x40` | `ENV_CTRL` | 8 bits | Control bits: `[0]` Enable, `[1]` Gate, `[2]` Loop (LFO), `[3]` Ping-Pong (Reserved Placeholder), `[4]` Reverse (Reserved Placeholder), `[6:5]` Curve Model (`00`=Lin, `01`=Exp, `10`=Log, `11`=S-Curve) |
 | `0x41` | `ENV_ATTACK` | 8 bits | Attack rate coefficient (speed of phase accumulator in Attack) |
 | `0x42` | `ENV_DECAY` | 8 bits | Decay rate coefficient |
 | `0x43` | `ENV_SUSTAIN` | 8 bits | Sustain Level (0 to 255, scaled to 10-bit range internally) |
@@ -496,12 +496,12 @@ The following registers are mapped into the `spinalSynth` SPI/UART register bus 
 
 `EnvelopeCtrl` is the state machine and synchronization module that determines the active phase increment values and the play direction.
 
-### 9.2.1 ADSR & Advanced Playback Modes
+### 9.2.1 ADSR & Playback Modes
 There are different modes for the ADSR playback envelopes and shapes:
 * **Normal (One-Shot):** Triggers on Gate ON, transitions from Attack to Decay to Sustain, and goes to Release on Gate OFF.
-* **Reverse (One-Shot):** Reverses the playback of active segments.
-* **Ping-Pong Mode (One-Shot):** Playback alternates direction: playing forward (Attack -> Decay) and then reversing (Decay -> Attack in reverse shape).
 * **Looping (LFO Mode):** The envelope automatically loops back to the start of the Attack phase once the Decay phase finishes.
+* **Reverse Mode (Reserved Placeholder):** Retained in register map; not implemented in active RTL logic.
+* **Ping-Pong Mode (Reserved Placeholder):** Retained in register map; not implemented in active RTL logic.
 
 ```text
   Normal (One-Shot):
@@ -511,23 +511,6 @@ There are different modes for the ADSR playback envelopes and shapes:
              /  \            \
             /    \____________\
              A   D     S      R
-
-  Reverse (One-Shot):
-   Gate   : ┌─────────────┐
-            │             └───────────────────
-   Output :    _____________/\
-             /             /  \
-            /_____________/    \
-               R      S   D   A
-
-  Ping-Pong (One-Shot):
-   Gate   : ┌────────────────────────────────────────────
-            │
-   Output :   /\    /\
-             /  \  /  \
-            /    \/    \
-             A   D    D   A
-             (Forward)  (Reverse)
 
   Looping (LFO Mode):
    Gate   : ┌────────────────────────────────────────────
@@ -540,8 +523,8 @@ There are different modes for the ADSR playback envelopes and shapes:
 
 ### 9.2.2 Sync and Phase
 * **Hard Sync:** An external sync trigger instantly resets the current envelope phase accumulator back to 0 (start of Attack) and restarts the state machine.
-* **Soft Sync:** An external sync trigger immediately switches direction to falling (if rising), or scales rate to phase-lock to the trigger frequency without clicky resets.
-* **MIDI Sync & Clock Division:** Locks Attack, Decay, and Release times to tempo-subdivisions of MIDI Clock (24 Pulses Per Quarter Note - PPQN), with a 0 to 360-degree Phase Offset.
+* **Soft Sync (Reserved Placeholder):** Bypassed in current active RTL.
+* **MIDI Sync & Clock Division (Reserved Placeholder):** Bypassed in current active RTL.
 
 ### 9.2.3 AD(S)R Lengths: Time Duration Mapping
 In synthesizer design, how parameter values map to actual time durations directly determines the musical feel of the instrument. 
@@ -579,10 +562,14 @@ Mathematical Model:
 
 ## 9.3 EnvelopeAccumulator
 
-The `EnvelopeAccumulator` acts as the time-tracking motor of the envelope generator.
+The `EnvelopeAccumulator` acts as the time-tracking motor of the envelope generator, capable of counting in both directions (forward and reverse) depending on the active stage.
 
 ### How the Accumulator works
-The accumulator is a register with a fixed width of 32 bits. On every system clock cycle (24MHz), the accumulator adds the selected 22-bit phase increment to its current value. The upper 10 bits of the accumulator are used as the output. These 10 output bits form a ramp function, like a sawtooth wave. The frequency of this ramp is determined by the phase increment value. 
+The accumulator is a 32-bit register. On every master clock cycle (24 MHz), the accumulator adds (or subtracts) the active 22-bit phase increment value:
+* **Attack (Stage 1)**: Counts UP (`accumDir = 0`). `segmentDone` triggers when it overflows past `1023` (representing index 255).
+* **Decay (Stage 2)**: Counts DOWN (`accumDir = 1`). `segmentDone` triggers when the integer `baseIndex` matches or crosses below `sustainLevel` (using an 8-bit hardware comparator).
+* **Sustain (Stage 3)**: Paused (`runAccum = 0`), naturally holding the output stable at `sustainLevel` without any pipeline registers.
+* **Release (Stage 4)**: Counts DOWN (`accumDir = 1`). `segmentDone` triggers when it underflows (representing `baseIndex` reaching `0`).
 
 ### Clock and Frequency Boundaries
 At the 24 MHz main clock rate with a 32-bit accumulator and 22-bit phase increment, the exact operational limits are calculated as follows:
@@ -594,7 +581,7 @@ At the 24 MHz main clock rate with a 32-bit accumulator and 22-bit phase increme
 
 ### Hardware Phase Specifications
 * **Accumulator Size:** Uses a 32-bit phase accumulator (10 bits integer + 22 bits fraction).
-* **Segment Limits:** When the phase sweeps to its terminal value (overflow, depending on direction), the module asserts the `segmentDone` flag back to `EnvelopeCtrl` to prompt state transitions.
+* **Segment Limits:** Evaluated dynamically based on FSM state (`overflow` for Attack, `baseIndex <= sustainLevel` for Decay, `underflow` for Release).
 * **Output Splitting:** Splits the upper 10 integer bits of the active 32-bit phase (bits 31 to 22) into two fields to drive the waveshaper:
   * **Base Index:** The higher 8 bits of the integer part (bits 31 to 24), representing the active step index (0 to 255).
   * **Fractional Part:** The lower 2 bits of the integer part (bits 23 to 22), representing the interpolation fraction (0 to 3).
@@ -605,14 +592,10 @@ At the 24 MHz main clock rate with a 32-bit accumulator and 22-bit phase increme
 
 The `EnvelopeShaper` is the output stage of the envelope generator. 
 
-It takes the raw, linear sawtooth ramp output from the accumulator (which always counts from 0 to 1023) and transforms it into musically expressive envelope curves. 
-
-It uses the upper 8-bit to lookup the active curve shape from our small ROM tables, and uses the 2 fractional bits to smoothly fill in the gaps between the data points. All interpolation is performed in pure combinational shift-add logic without any physical multipliers.
-
-Finally, it outputs the unipolar (unsigned Int) and bipolar (signed Int) signals in parallel.
+It takes the raw, linear ramp outputs from the accumulator and transforms them into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
 
 ### 9.4.1 ROM Lookup tables
-The higher 8 bits of the 10-bit accumulator output (Base Index) are used as the address to lookup the selected curve shape from our small ROM tables. The curves are pre-calculated as 257-word ROMs (257 x 8 bits) using these profiles:
+The Base Index (upper 8 bits) addresses lookup curves from pre-calculated 257-word ROMs (257 x 8 bits) using these profiles:
 
 | Curve Model | Description | Primary Audio Application |
 | :--- | :--- | :--- |
@@ -628,17 +611,22 @@ To calculate Y1 = LUT[x+1] when the base index is at its boundary (x = 255) with
 Using the splits from the 10 bits accumulator output:
 * The 8-bit Base Index looks up the boundary values Y0 = LUT[x] and Y1 = LUT[x+1].
 * The 2-bit fraction f represents step fractions {0, 1/4, 2/4, 3/4}.
-* **Interpolated Output Y:** Y = Y0 + (f / 4) * (Y1 - Y0)
+* **Interpolation**: Evaluates `Y = Y0 + (f / 4) * (Y1 - Y0)`.
+* **Reverse Gating**: When counting backwards (`accumDir = 1` during Decay and Release), the 2-bit fractional index is mirrored combinationally:
+  `fractionAdjusted = accumDir ? (3 - fraction) : fraction`
+  This guarantees that interpolation sweeps smoothly and linearly downward in both directions.
 
 ### 9.4.3 Multiplierless Shift-Add Implementation
 The fractional calculation is implemented in pure combinational shift-add logic:
 
-| Fractional Bits (f) | Fraction Value | Hardware Shift-Add Expression |
+| Fractional Bits (f_adjusted) | Fraction Value | Hardware Shift-Add Expression |
 | :---: | :---: | :--- |
 | `00` | 0.00 | Y0 |
 | `01` | 0.25 | Y0 + (delta Y >> 2) |
 | `10` | 0.50 | Y0 + (delta Y >> 1) |
 | `11` | 0.75 | Y0 + (delta Y >> 1) + (delta Y >> 2) |
+
+Since the accumulator physically halts at `sustainLevel` during Sustain and counts backwards naturally during Decay and Release, **no multipliers or sustain delay pipelines are required**, making the output stage extremely area-efficient.
 
 ---
 

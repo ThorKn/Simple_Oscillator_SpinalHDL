@@ -21,7 +21,8 @@ class EnvelopeShaperSim extends AnyFunSuite {
       dut.io.fraction #= 0
       dut.io.curveSelect #= 0
       dut.io.sustainLevel #= 0
-      dut.io.activeStage #= 0      // Wait 1 clock cycle to stabilize signals under active reset
+      dut.io.activeStage #= 0
+      dut.io.accumDir #= false      // Wait 1 clock cycle to stabilize signals under active reset
       dut.clockDomain.waitSampling()
 
       // ---------------------------------------------------------------------
@@ -31,6 +32,7 @@ class EnvelopeShaperSim extends AnyFunSuite {
       dut.io.phaseTick #= true
       dut.io.baseIndex #= 128
       dut.io.curveSelect #= 1
+      dut.io.accumDir #= false
       
       // Verify outputs remain strictly quiet during the natural active reset phase of forkStimulus
       assert(!dut.io.envelopeOut.valid.toBoolean, "envelopeOut.valid must remain False under reset")
@@ -50,7 +52,7 @@ class EnvelopeShaperSim extends AnyFunSuite {
       // ---------------------------------------------------------------------
       // 1.3.2 Multiplierless Shift-Add Interpolation Accuracy
       // ---------------------------------------------------------------------
-      println("Verifying Multiplierless Shift-Add Interpolation Accuracy:")
+      println("Verifying Multiplierless Shift-Add Interpolation Accuracy (Forward Sweep):")
       
       // Set to Linear Curve model (curveSelect = 00)
       // Linear ROM values are perfectly continuous: LUT[x] = x. 
@@ -58,6 +60,7 @@ class EnvelopeShaperSim extends AnyFunSuite {
       dut.io.curveSelect #= 0
       dut.io.baseIndex #= 10
       dut.io.phaseTick #= true
+      dut.io.accumDir #= false
       
       // Wait to let the new curve selection and baseIndex settle in the register pipeline
       dut.clockDomain.waitSampling(2)
@@ -73,9 +76,26 @@ class EnvelopeShaperSim extends AnyFunSuite {
         val expectedVal = 40 + f
         val actualVal = dut.io.envelopeOut.payload.toInt
         println(s"DEBUG: f=$f, baseIndex=${dut.io.baseIndex.toInt}, fraction=${dut.io.fraction.toInt}, curveSelect=${dut.io.curveSelect.toInt}")
-        println(s"DEBUG INTERNAL: y0=${dut.y0.toInt}, y1=${dut.y1.toInt}, finalValUnipolar=${dut.finalValUnipolar.toInt}, delayedActiveStage=${dut.delayedActiveStage.toInt}, isSustainDelayed=${dut.isSustainDelayed.toBoolean}, finalValUnipolarClamped=${dut.finalValUnipolarClamped.toInt}")
+        println(s"DEBUG INTERNAL: y0=${dut.y0.toInt}, y1=${dut.y1.toInt}, finalValUnipolar=${dut.finalValUnipolar.toInt}")
         println(s"DEBUG OUTPUT: payload=$actualVal, valid=${dut.io.envelopeOut.valid.toBoolean}")
         assert(actualVal == expectedVal, s"[Fraction f = $f] Expected interpolated output $expectedVal, got $actualVal")
+      }
+
+      // Test Reverse Interpolation counting backwards (accumDir = true)
+      println("Verifying Multiplierless Shift-Add Interpolation Accuracy (Reverse Sweep):")
+      dut.io.accumDir #= true
+      dut.clockDomain.waitSampling(2)
+
+      for (f <- fractions) {
+        dut.io.fraction #= f
+        dut.clockDomain.waitSampling(2)
+        
+        // In reverse mode, fractionAdjusted is 3 - f.
+        // Expected unipolar output should scale as: 40 + (3 - f)
+        val expectedVal = 40 + (3 - f)
+        val actualVal = dut.io.envelopeOut.payload.toInt
+        println(s"DEBUG REVERSE: f=$f, fractionAdjusted=${3-f}, payload=$actualVal")
+        assert(actualVal == expectedVal, s"[Reverse Fraction f = $f] Expected interpolated output $expectedVal, got $actualVal")
       }
       
       println("Multiplierless Shift-Add Interpolation Accuracy verified successfully.")
@@ -84,6 +104,7 @@ class EnvelopeShaperSim extends AnyFunSuite {
       // 1.3.3 Parallel Bipolar Output Scaling
       // ---------------------------------------------------------------------
       println("Verifying Parallel Bipolar Output Scaling:")
+      dut.io.accumDir #= false
       
       // We sweep across multiple arbitrary baseIndex values and verify the SInt conversion
       val testIndices = Array(0, 64, 128, 255)

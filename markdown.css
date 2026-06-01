@@ -1,8 +1,26 @@
-h1,
-h2,
-h3 {
-    font-size: 15px;
+h1 {
+    font-size: 20px;
     line-height: 150%;
+}
+
+h2 {
+    font-size: 18px;
+    line-height: 150%;
+}
+
+h3 {
+    font-size: 16px;
+    line-height: 130%;
+}
+
+h4 {
+    font-size: 13px;
+    line-height: 130%;
+}
+
+h5 {
+    font-size: 13px;
+    line-height: 130%;
 }
 
 p,
@@ -12,6 +30,6 @@ code,
 table,
 th,
 td {
-    font-size: 13px;
+    font-size: 12px;
     line-height: 150%;
 }

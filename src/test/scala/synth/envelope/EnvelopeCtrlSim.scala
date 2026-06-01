@@ -54,6 +54,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       // IDLE -> ATTACK (activeStage = 1)
       assert(dut.io.activeStage.toInt == 1, s"Expected activeStage 1 (ATTACK) after Gate ON, got ${dut.io.activeStage.toInt}")
       assert(dut.io.runAccum.toBoolean, "Accumulator should run during ATTACK stage")
+      assert(!dut.io.accumDir.toBoolean, "Accumulator direction must be Forward (Up) during ATTACK stage")
 
       // Step 2: Pulse segmentDone to transition to DECAY
       dut.io.segmentDone #= true
@@ -64,6 +65,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       // ATTACK -> DECAY (activeStage = 2)
       assert(dut.io.activeStage.toInt == 2, s"Expected activeStage 2 (DECAY) after Attack done, got ${dut.io.activeStage.toInt}")
       assert(dut.io.runAccum.toBoolean, "Accumulator should run during DECAY stage")
+      assert(dut.io.accumDir.toBoolean, "Accumulator direction must be Reverse (Down) during DECAY stage")
 
       // Step 3: Pulse segmentDone to transition to SUSTAIN
       dut.io.segmentDone #= true
@@ -82,6 +84,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       // SUSTAIN -> RELEASE (activeStage = 4)
       assert(dut.io.activeStage.toInt == 4, s"Expected activeStage 4 (RELEASE) after Gate OFF, got ${dut.io.activeStage.toInt}")
       assert(dut.io.runAccum.toBoolean, "Accumulator should run during RELEASE stage")
+      assert(dut.io.accumDir.toBoolean, "Accumulator direction must be Reverse (Down) during RELEASE stage")
 
       // Step 5: Pulse segmentDone to transition back to IDLE
       dut.io.segmentDone #= true

@@ -25,6 +25,8 @@ class EnvelopeAccumulatorSim extends AnyFunSuite {
       dut.io.runAccum #= false
       dut.io.accumDir #= false
       dut.io.phaseInc #= 0
+      dut.io.activeStage #= 0
+      dut.io.sustainLevel #= 0
 
       // Wait 1 clock cycle (within startup reset window)
       dut.clockDomain.waitSampling()
@@ -46,6 +48,7 @@ class EnvelopeAccumulatorSim extends AnyFunSuite {
       // Set phaseInc to 0x200000 (which increases accum by 2^21 per cycle)
       dut.io.runAccum #= true
       dut.io.phaseInc #= 0x200000
+      dut.io.activeStage #= 1 // Attack stage
       
       // Cycle 1 (after 2 cycles of accumulation due to delta-cycle wait): accum = 0x200000 -> baseIndex = 0, fraction = 0
       dut.clockDomain.waitSampling(2)
@@ -100,6 +103,7 @@ class EnvelopeAccumulatorSim extends AnyFunSuite {
       // Set phaseInc to 0x200000 (takes exactly 2048 steps to wrap)
       dut.io.phaseInc #= 0x200000
       dut.io.accumDir #= false // Forward/Up
+      dut.io.activeStage #= 1 // Attack stage
       dut.io.runAccum #= true
       
       // Let it run until segmentDone is asserted
@@ -134,6 +138,7 @@ class EnvelopeAccumulatorSim extends AnyFunSuite {
       // Counting down from 0x00000000 immediately underflows on the first cycle
       dut.io.accumDir #= true
       dut.io.phaseInc #= 0x200000
+      dut.io.activeStage #= 4 // Release stage
       dut.io.runAccum #= true
       
       dut.clockDomain.waitSampling()
@@ -146,6 +151,47 @@ class EnvelopeAccumulatorSim extends AnyFunSuite {
       dut.io.runAccum #= false
       dut.clockDomain.waitSampling()
       println("Reverse Underflow Done Detection verified successfully.")
+
+      // ---------------------------------------------------------------------
+      // 1.2.5 Decay Target Done Detection
+      // ---------------------------------------------------------------------
+      println("Verifying Decay Target Done Detection:")
+      
+      // Initialize accumulator to full scale
+      dut.io.resetAccum #= true
+      dut.clockDomain.waitSampling()
+      dut.io.resetAccum #= false
+      
+      // Force accum register directly to 130 << 24 (baseIndex = 130)
+      dut.accum #= (130L << 24)
+      dut.clockDomain.waitSampling()
+      
+      // Configure Decay: target sustain level = 128
+      dut.io.activeStage #= 2 // Decay stage
+      dut.io.sustainLevel #= 128
+      dut.io.accumDir #= true // Reverse/Down
+      dut.io.phaseInc #= 0x200000 // Decrement by 0x200000 per cycle (takes 16 cycles to cross sustain target 128)
+      dut.io.runAccum #= true
+      
+      // Let it count down and verify it triggers segmentDone when baseIndex <= sustainLevel (128)
+      var decayCycles = 0
+      while(!dut.io.segmentDone.toBoolean && decayCycles < 100) {
+        dut.clockDomain.waitSampling()
+        decayCycles += 1
+        println(s"[Decay Cycle $decayCycles] baseIndex: ${dut.io.baseIndex.toInt}, segmentDone: ${dut.io.segmentDone.toBoolean}")
+      }
+      
+      assert(dut.io.segmentDone.toBoolean, "Expected segmentDone to trigger on decay target matching/crossing")
+      assert(dut.io.baseIndex.toInt <= 128, s"Expected baseIndex <= 128 at decay target match, got ${dut.io.baseIndex.toInt}")
+      
+      // Verify segmentDone clears automatically when transitioning to Sustain (stage 3)
+      dut.io.activeStage #= 3
+      dut.clockDomain.waitSampling()
+      assert(!dut.io.segmentDone.toBoolean, "segmentDone must drop back to False in subsequent cycles")
+      
+      dut.io.runAccum #= false
+      dut.clockDomain.waitSampling()
+      println("Decay Target Done Detection verified successfully.")
     }
   }
 }

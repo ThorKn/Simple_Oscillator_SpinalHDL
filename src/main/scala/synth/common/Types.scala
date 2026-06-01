@@ -35,3 +35,13 @@ case class EnvelopeConfig() extends Bundle {
   val phaseOffset = UInt(8 bits)
 }
 
+// Stage constants for the Envelope Generator FSM
+object EnvelopeStage {
+  val IDLE    = 0
+  val ATTACK  = 1
+  val DECAY   = 2
+  val SUSTAIN = 3
+  val RELEASE = 4
+}
+
+

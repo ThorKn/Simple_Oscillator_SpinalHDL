@@ -12,9 +12,11 @@ class EnvelopeShaper extends Component {
     val curveSelect  = in UInt(2 bits)        // 00=Lin, 01=Exp, 10=Log, 11=S-Curve
     val sustainLevel = in UInt(8 bits)        // Target sustain level (0 to 255)
     val activeStage  = in UInt(3 bits)        // Active FSM stage indicator (IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4)
+    val accumDir     = in Bool()              // Direction of accumulator (0 = Forward, 1 = Reverse)
     val envelopeOut       = master(Flow(UInt(10 bits))) // 10-bit unipolar flow (0 to 1023)
     val envelopeOutSigned = master(Flow(SInt(10 bits))) // 10-bit bipolar flow (-512 to +511)
   }
+
 
   // -------------------------------------------------------------------------
   // 1. Compile-Time ROM Contents Generation (257 entries each)
@@ -105,7 +107,10 @@ class EnvelopeShaper extends Component {
   val deltaShifted = (delta << 1).resize(12 bits) // 2 * delta
   val deltaResized = delta.resize(12 bits)
 
-  switch(io.fraction) {
+  // Swap interpolation fraction direction based on accumDir when counting backwards
+  val fractionAdjusted = io.accumDir ? (U(3) - io.fraction) | io.fraction
+
+  switch(fractionAdjusted) {
     is(0) { interp := y0Shifted }
     is(1) { interp := y0Shifted + deltaResized }
     is(2) { interp := y0Shifted + deltaShifted }
@@ -116,29 +121,14 @@ class EnvelopeShaper extends Component {
   val finalValUnipolar = interp.asUInt.resize(10 bits).simPublic()
 
   // -------------------------------------------------------------------------
-  // 5. Sustain Clamping with 3-Cycle Delay Matching
+  // 5. Parallel Output Conversion & Flow Gating (1-Cycle Latency Pipeline)
   // -------------------------------------------------------------------------
-  // Scale sustainLevel from 8 bits to 10 bits combinationally
-  val scaledSustain = (io.sustainLevel << 2).resize(10 bits)
-
-  // Delay FSM state indicator and sustain level by exactly 3 cycles to match pipeline latency
-  val delayedActiveStage = Delay(io.activeStage, cycleCount = 3).simPublic()
-  val delayedSustain     = Delay(scaledSustain, cycleCount = 3)
-
-  // Clamp output to the static sustain level when the delayed FSM is in the SUSTAIN state (activeStage = 3)
-  val isSustainDelayed = (delayedActiveStage === 3).simPublic()
-  val finalValUnipolarClamped = Mux(isSustainDelayed, delayedSustain, finalValUnipolar).simPublic()
-
-  // -------------------------------------------------------------------------
-  // 6. Parallel Output Conversion & Flow Gating (1-Cycle Latency Pipeline)
-  // -------------------------------------------------------------------------
-  
-  // Unipolar Output Stage (0 to 1023)
-  io.envelopeOut.payload := RegNext(finalValUnipolarClamped) init(0)
+  // Unipolar Output Stage (0 to 1023) - Routed directly since FSM naturally holds baseIndex on Sustain
+  io.envelopeOut.payload := RegNext(finalValUnipolar) init(0)
 
   // Bipolar Output Stage (-512 to +511)
   // Invert the MSB to map 0 to 1023 unipolar to -512 to 511 signed center-zero combinationally
-  val finalValBipolar = (finalValUnipolarClamped ^ 0x200).asSInt
+  val finalValBipolar = (finalValUnipolar ^ 0x200).asSInt
   io.envelopeOutSigned.payload := RegNext(finalValBipolar) init(0)
 
   // Heartbeat valid flow gating qualified with active reset check

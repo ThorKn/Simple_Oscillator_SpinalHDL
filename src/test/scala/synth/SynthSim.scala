@@ -61,8 +61,18 @@ class SynthSim extends AnyFunSuite {
       // Configure PWM width: 0x80 -> 50% Duty Cycle (address 0x04)
       writeRegister(0x04, 0x80)
 
-      // Configure volume: 0xFF -> Max Output Scale (address 0x05)
+      // Configure volume: 0xFF -> Max Master Volume (address 0x05)
       writeRegister(0x05, 0xFF)
+
+      // Configure Envelope Parameters:
+      // Enable envelope (bit 0 = 1) + Gate ON (bit 1 = 2) -> value = 3 (address 0x40)
+      writeRegister(0x40, 0x03)
+      // Attack = 0 (fastest 0.5 ms rise) (address 0x41)
+      writeRegister(0x41, 0x00)
+      // Decay = 0 (address 0x42)
+      writeRegister(0x42, 0x00)
+      // Sustain = 128 (address 0x43)
+      writeRegister(0x43, 0x80)
 
       // Configure Frequency Tuning Word (0x080000) atomically to output a 15 kHz tone:
       writeRegister(0x00, 0x00) // FREQ_LOW -> Stages
@@ -116,6 +126,7 @@ class SynthSim extends AnyFunSuite {
       // 7. Verify captured data results
       println("\nVerifying integration output results:")
       var nonZeroSamples = 0
+      var maxAbsValue = 0
       
       for ((l, r) <- capturedSamples) {
         println(f" I2S Frame: L=$l%6d | R=$r%6d")
@@ -123,18 +134,23 @@ class SynthSim extends AnyFunSuite {
         // Assert left and right channel samples are perfectly identical (stereo alignment)
         assert(l == r, s"Stereo channel mismatch: Left ($l) and Right ($r) should be identical")
         
+        val absVal = l.abs
+        if (absVal > maxAbsValue) {
+          maxAbsValue = absVal
+        }
+        
         if (l != 0) {
           nonZeroSamples += 1
-          // Since it is configured to a 50% duty cycle PWM square wave, samples should reach peaks
-          // With dual cascaded attenuators (10-bit bypassed at 1023, 8-bit master volume at 255):
-          // peak = 32767 * (1023/1024) * (255/256) = 32607, and negative peak rounds to -32609 due to signed shift rounding
-          assert(l == 32607 || l == -32609, s"Unexpected sample value: $l. Expected PWM peak 32607 or -32609.")
+          // Amplitude is dynamic under the active ADSR envelope, so we assert it is bound by the maximum possible peak
+          assert(absVal <= 32609, s"Unexpected sample value out of bounds: $l")
         }
       }
       
       // Proves the register writing reached the synthesizer DSP engine and changed the audio output
       assert(nonZeroSamples > 0, "Synthesizer is still silent! UART configuration did not reach DSP engine.")
-      println(f"Integration simulation successful: $nonZeroSamples non-zero stereo PWM frames captured!")
+      // Proves the active envelope actually scales output up dynamically over time (it must not remain constant or static at max/min)
+      assert(maxAbsValue > 5000, s"Envelope output remained too quiet. Max absolute value: $maxAbsValue")
+      println(f"Integration simulation successful: $nonZeroSamples non-zero stereo PWM frames modulated by envelope captured!")
     }
   }
 }

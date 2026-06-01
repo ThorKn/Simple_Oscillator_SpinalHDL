@@ -27,6 +27,8 @@ class EnvelopeGenerator extends Component {
   accumulator.io.runAccum     := ctrl.io.runAccum
   accumulator.io.accumDir     := ctrl.io.accumDir
   accumulator.io.phaseInc     := ctrl.io.phaseInc
+  accumulator.io.sustainLevel := io.config.sustain
+  accumulator.io.activeStage  := ctrl.io.activeStage
   ctrl.io.segmentDone         := accumulator.io.segmentDone
 
   // Connecting Accumulator and Ctrl to Shaper
@@ -36,6 +38,7 @@ class EnvelopeGenerator extends Component {
   shaper.io.curveSelect  := ctrl.io.curveSelect
   shaper.io.sustainLevel := io.config.sustain
   shaper.io.activeStage  := ctrl.io.activeStage
+  shaper.io.accumDir     := ctrl.io.accumDir
 
   // Connecting Top-Level inputs to Ctrl
   ctrl.io.syncIn         := io.syncIn

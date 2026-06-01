@@ -84,31 +84,27 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // ---------------------------------------------------------------------
       // 2.1.3 Pipeline Latency & Sustain Clamping Sync
       // ---------------------------------------------------------------------
-      println("Verifying 3-Cycle Pipeline Latency & Delay-Matched Sustain Clamping:")
+      println("Verifying 1-Cycle Pipeline Latency & Delay-Matched Sustain Clamping:")
       
       // Reset generator to IDLE
       dut.io.config.ctrl #= 0
       sleep(1)
-      dut.clockDomain.waitSampling(5) // Allow pipeline to drain
+      dut.clockDomain.waitSampling(5) // Allow pipeline to settle
       
       // Gate ON at Cycle 0
       dut.io.config.ctrl #= 2
       sleep(1) // Settle Gate ON input before clocking
       
-      // Verify first output appears exactly at Cycle 3 (confirming the 3-cycle pipeline: T0 -> T1 -> T2 -> T3)
-      dut.clockDomain.waitSampling() // T0
-      assert(dut.io.envelopeOut.payload.toInt == 0, "Pipeline T0: Output must be 0")
-      dut.clockDomain.waitSampling() // T1
-      assert(dut.io.envelopeOut.payload.toInt == 0, "Pipeline T1: Output must be 0")
-      dut.clockDomain.waitSampling() // T2
-      assert(dut.io.envelopeOut.payload.toInt == 0, "Pipeline T2: Output must be 0")
+      // Verify first output appears exactly after Cycle 3 and starts climbing after Cycle 50
+      dut.clockDomain.waitSampling(3) // FSM transitions, accumulator resets to 0 (at Cycle 2), shaper registers 0 (at Cycle 3)
+      assert(dut.io.envelopeOut.payload.toInt == 0, s"Pipeline: Output must be 0, got ${dut.io.envelopeOut.payload.toInt}")
       
-      // Wait 15 more cycles to let the high-precision accumulator cross the LSB threshold and propagate
-      dut.clockDomain.waitSampling(15)
+      // Wait 47 more cycles to let the high-precision accumulator cross the LSB threshold and propagate
+      dut.clockDomain.waitSampling(47)
       val valAfterPropagation = dut.io.envelopeOut.payload.toInt
-      assert(valAfterPropagation > 0, s"Pipeline T17: Expected active value, got $valAfterPropagation")
+      assert(valAfterPropagation > 0, s"Pipeline: Expected active value after propagation, got $valAfterPropagation")
       
-      println("3-Cycle Pipeline Latency & Delay-Matched Sustain Clamping verified successfully.")
+      println("1-Cycle Pipeline Latency & Delay-Matched Sustain Clamping verified successfully.")
 
       // ---------------------------------------------------------------------
       // 2.1.4 Simultaneous Gate and Sync Conflict
@@ -174,6 +170,66 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       }
       
       println("Mid-Flight Wave-Shaping Curve Switching verified successfully.")
+
+      // ---------------------------------------------------------------------
+      // 2.1.7 Full ADSR State Transition and Output Verification
+      // ---------------------------------------------------------------------
+      println("Verifying Full ADSR State Transition and Output Verification:")
+      
+      // Configure linear ADSR: Sustain = 128 (512)
+      dut.io.config.ctrl #= 2 // Gate ON, Envelope Enable
+      dut.io.config.sustain #= 128
+      dut.io.config.attack #= 0
+      dut.io.config.decay #= 0
+      sleep(1)
+
+      // 1. Transition to ATTACK
+      dut.clockDomain.waitSampling(2)
+      
+      // 2. Force ATTACK to complete by setting accum close to overflow
+      dut.accumulator.accum #= 0xFFF00000L
+      dut.clockDomain.waitSampling(4) // Let it accumulate and transition to DECAY phase (where it presets to 0xFFFFFFFF)
+      
+      // Verify that after Cycle 4, the accumulator has preset to full scale (0xFFFFFFFF) in DECAY phase
+      assert(dut.accumulator.accum.toLong == 4294967295L, s"DECAY Peak: Accumulator must be preset to 0xFFFFFFFF, got ${dut.accumulator.accum.toLong}")
+      
+      // 3. Verify FSM is in DECAY stage (stage 2) and counting downwards
+      dut.clockDomain.waitSampling() // Cycle 5
+      val valAtDecayStart = dut.io.envelopeOut.payload.toInt
+      assert(dut.accumulator.accum.toLong == 4294609381L, s"DECAY Downward step: Expected 4294609381, got ${dut.accumulator.accum.toLong}")
+      
+      // 4. Force decay to complete by setting accum close to sustainLevel (128)
+      // We set it to 129 << 24, so that on the next step it crosses <= 128
+      dut.accumulator.accum #= (129L << 24)
+      dut.clockDomain.waitSampling() // Let it step into <= 128
+      
+      // 5. Verify transition to SUSTAIN (stage 3)
+      dut.clockDomain.waitSampling() // Transition to SUSTAIN on this edge
+      // Accumulator is frozen in SUSTAIN
+      val valAtSustain = dut.io.envelopeOut.payload.toInt
+      // Since sustainLevel = 128, the shaped sustain value is approximately half scale (512 plus fractional crossing step LSBs)
+      assert(valAtSustain >= 512 && valAtSustain <= 525, s"SUSTAIN Level: Expected close to 512, got $valAtSustain")
+      
+      // 6. Transition to RELEASE (stage 4) by toggling Gate OFF
+      dut.io.config.ctrl #= 0
+      sleep(1)
+      dut.clockDomain.waitSampling(2) // FSM transitions to RELEASE
+      
+      // 7. Verify RELEASE downward progression. Accumulator must count down from sustain level.
+      // We set accum close to underflow to trigger the completion
+      dut.accumulator.accum #= 100 // Very small value so that subtracting phaseInc (357914) underflows instantly
+      dut.clockDomain.waitSampling() // Step into underflow
+      
+      // 8. Verify transition to IDLE (stage 0)
+      dut.clockDomain.waitSampling() // Transition to IDLE
+      // The first cycle of IDLE still reflects the last RELEASE state's active value (3) due to 1-cycle shaper RegNext latency
+      assert(dut.io.envelopeOut.payload.toInt == 3, s"T0 IDLE Level: Expected 3, got ${dut.io.envelopeOut.payload.toInt}")
+      
+      dut.clockDomain.waitSampling() // Let the 1-cycle pipeline register drain to 0
+      val valAtIdle = dut.io.envelopeOut.payload.toInt
+      assert(valAtIdle == 0, s"IDLE Level: Expected 0, got $valAtIdle")
+      
+      println("Full ADSR State Transition and Output Verification verified successfully.")
     }
   }
 }

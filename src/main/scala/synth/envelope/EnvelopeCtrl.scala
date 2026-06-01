@@ -3,7 +3,7 @@ package synth.envelope
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
-import synth.common.EnvelopeConfig
+import synth.common.{EnvelopeConfig, EnvelopeStage}
 
 class EnvelopeCtrl extends Component {
   val io = new Bundle {
@@ -46,9 +46,9 @@ class EnvelopeCtrl extends Component {
   val romAddr = UInt(8 bits)
   romAddr := 0
   switch(io.activeStage) {
-    is(1) { romAddr := io.config.attack }
-    is(2) { romAddr := io.config.decay }
-    is(4) { romAddr := io.config.release }
+    is(EnvelopeStage.ATTACK)  { romAddr := io.config.attack }
+    is(EnvelopeStage.DECAY)   { romAddr := io.config.decay }
+    is(EnvelopeStage.RELEASE) { romAddr := io.config.release }
   }
   io.phaseInc := rom.readAsync(romAddr)
 
@@ -62,8 +62,9 @@ class EnvelopeCtrl extends Component {
   val syncInD1 = RegNext(io.syncIn) init(false)
   val hardSyncPulse = io.syncIn && !syncInD1 && io.config.syncCtrl(0) && !ClockDomain.current.isResetActive
 
-  // Direction control: Reverse Mode active if ctrl[4] = True
-  io.accumDir := io.config.ctrl(4)
+  // Direction control: Dynamically count downwards during DECAY and RELEASE phases.
+  // Note: ctrl(4) (Reverse Mode) and ctrl(3) (Ping-Pong Mode) are reserved as future placeholders.
+  io.accumDir := io.activeStage === EnvelopeStage.DECAY || io.activeStage === EnvelopeStage.RELEASE
 
   // -------------------------------------------------------------------------
   // ADSR State Machine (built-in spinal.lib.fsm)
@@ -82,10 +83,10 @@ class EnvelopeCtrl extends Component {
     // Default outputs driven from FSM
     fsmResetAccum  := False
     fsmRunAccum    := False
-    fsmActiveStage := 0
+    fsmActiveStage := EnvelopeStage.IDLE
 
     IDLE.whenIsActive {
-      fsmActiveStage := 0
+      fsmActiveStage := EnvelopeStage.IDLE
       when(gateOn) {
         fsmResetAccum := True
         fsmRunAccum   := True
@@ -94,13 +95,12 @@ class EnvelopeCtrl extends Component {
     }
 
     ATTACK.whenIsActive {
-      fsmActiveStage := 1
+      fsmActiveStage := EnvelopeStage.ATTACK
       fsmRunAccum    := True
       when(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        fsmResetAccum := True
         goto(RELEASE)
       } elsewhen(io.segmentDone) {
         fsmResetAccum := True
@@ -109,16 +109,15 @@ class EnvelopeCtrl extends Component {
     }
 
     DECAY.whenIsActive {
-      fsmActiveStage := 2
+      fsmActiveStage := EnvelopeStage.DECAY
       fsmRunAccum    := True
       when(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        fsmResetAccum := True
         goto(RELEASE)
       } elsewhen(io.segmentDone) {
-        // If Loop Mode (ctrl[2]) is active, loop back to Attack
+        // If Loop Mode (ctrl(2)) is active, loop back to Attack
         when(io.config.ctrl(2)) {
           fsmResetAccum := True
           goto(ATTACK)
@@ -129,18 +128,17 @@ class EnvelopeCtrl extends Component {
     }
 
     SUSTAIN.whenIsActive {
-      fsmActiveStage := 3
+      fsmActiveStage := EnvelopeStage.SUSTAIN
       when(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        fsmResetAccum := True
         goto(RELEASE)
       }
     }
 
     RELEASE.whenIsActive {
-      fsmActiveStage := 4
+      fsmActiveStage := EnvelopeStage.RELEASE
       fsmRunAccum    := True
       when(hardSyncPulse) {
         fsmResetAccum := True
@@ -149,6 +147,7 @@ class EnvelopeCtrl extends Component {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(io.segmentDone) {
+        fsmResetAccum := True
         goto(IDLE)
       }
     }
@@ -157,5 +156,5 @@ class EnvelopeCtrl extends Component {
   // Gate outputs combinationally with current active reset status
   io.resetAccum  := fsmResetAccum && !ClockDomain.current.isResetActive
   io.runAccum    := fsmRunAccum && !ClockDomain.current.isResetActive
-  io.activeStage := ClockDomain.current.isResetActive ? U(0, 3 bits) | fsmActiveStage
+  io.activeStage := ClockDomain.current.isResetActive ? U(EnvelopeStage.IDLE, 3 bits) | fsmActiveStage
 }

@@ -2,6 +2,8 @@
 
 This document provides the formal specifications for the simulation test suite in `spinalSynth`. It defines the verification logic, simulated environments, stimulus parameters, and assertion constraints for all unit and integration testbenches.
 
+---
+
 ## Table of Contents
 
 1. Unit Tests
@@ -26,7 +28,11 @@ This document provides the formal specifications for the simulation test suite i
 
 ## 1. Unit Tests
 
+---
+
 This chapter contains the specifications for testing individual, isolated hardware modules.
+
+---
 
 ### 1.1 Attenuator Unit Test (`AttenuatorSim`)
 
@@ -295,6 +301,8 @@ Verifies the I²S serial audio transmitter module (`I2STransmitter`) for startup
   - The first 8 bit intervals match the cycle-accurate modulation pattern: 16, 16, 15, 16, 16, 15, 16, 15 clock cycles.
   - The full Left/Right stereo frame completes in exactly 500 clock cycles ($48\text{ kHz}$ sampling rate).
 
+---
+
 ### 1.7 Envelope Control Unit Test (`EnvelopeCtrlSim`)
 
 #### Purpose
@@ -378,25 +386,29 @@ Verifies the 32-bit register accumulator, phase counting direction, split output
 #### Test Cases
 
 ##### 1.8.1 Reset Defaults
-* **Action**: Assert active-high `reset` for 5 clock cycles while driving arbitrary inputs on `runAccum = True`, `accumDir = True`, and `phaseInc = 0x200000` (valid 22-bit value).
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving arbitrary inputs on `runAccum = True`, `accumDir = True`, `activeStage = 0`, `sustainLevel = 0`, and `phaseInc = 0x200000` (valid 22-bit value).
 * **Assertion**: Verify that the internal phase register remains strictly at `0`, outputting `baseIndex = 0`, `fraction = 0`, and `segmentDone = False`.
-
+ 
 ##### 1.8.2 Phase Accumulation & Splitting Precision
-* **Action**: Drive `phaseInc = 0x200000` ($2^{21}$). Enable the accumulator.
+* **Action**: Drive `phaseInc = 0x200000` ($2^{21}$). Enable the accumulator and set `activeStage = 1` (Attack).
 * **Assertion**: Verify the splitting output precision:
   - Cycle 1: `baseIndex = 0`, `fraction = 0`.
   - Cycle 2: `baseIndex = 0`, `fraction = 1`.
   - Cycle 3: `baseIndex = 0`, `fraction = 1`.
   - Cycle 4: `baseIndex = 0`, `fraction = 2`.
   - Also verify fraction-only tracking with `phaseInc = 0x200000` using a 2-cycle wait over 3 steps (each step increments `fraction` by exactly `1`).
-
+ 
 ##### 1.8.3 Forward Wrap Done
-* **Action**: Set `accumDir = False` (Forward), load `phaseInc = 0x200000`. Run for 2048 cycles to wrap the 32-bit accumulator.
+* **Action**: Set `accumDir = False` (Forward), load `phaseInc = 0x200000`. Set `activeStage = 1` (Attack stage). Run for 2048 cycles to wrap the 32-bit accumulator.
 * **Assertion**: Verify that on the 2048th cycle, the register overflows, asserting `segmentDone = True` for exactly 1 cycle.
-
+ 
 ##### 1.8.4 Reverse Underflow Done
-* **Action**: Assert `resetAccum = True` to clear the counter to `0`. Set `accumDir = True` (Reverse), load `phaseInc = 0x200000`. Enable accumulator.
+* **Action**: Assert `resetAccum = True` to clear the counter to `0`. Set `accumDir = True` (Reverse), load `phaseInc = 0x200000`. Set `activeStage = 4` (Release stage). Enable accumulator.
 * **Assertion**: Verify that on the very first cycle, the counter underflows past zero, asserting `segmentDone = True` instantly for 1 cycle.
+
+##### 1.8.5 Decay Target Done Detection
+* **Action**: Initialize `accum` to `130 << 24` (`baseIndex = 130`). Set `activeStage = 2` (Decay stage), `sustainLevel = 128`, `accumDir = True` (Reverse), and `phaseInc = 0x200000`. Enable accumulator.
+* **Assertion**: Verify that `segmentDone` triggers exactly when `baseIndex` decrements and matches or crosses `<= sustainLevel` (128), and verify that `segmentDone` drops back to `False` on the subsequent cycle when transitioning `activeStage` to `3` (Sustain)..
 
 ---
 
@@ -437,15 +449,19 @@ Verifies the 257-entry LUT curves, shift-add combinational linear interpolation,
 * **Action**: Monitor the relationship between unipolar and bipolar outputs across different phase positions.
 * **Assertion**: Verify that `io.envelopeOutSigned.payload` is exactly equal to `(io.envelopeOut.payload ^ 0x200).asSInt`, confirming that the unipolar range (0 to 1023) maps perfectly to the center-zero bipolar range (-512 to +511) without logic delays or arithmetic units.
 
-##### 1.9.4 Sample Rate Flow Validation
-* **Action**: Toggle `phaseTick` between `True` and `False`.
-* **Assertion**: Verify that both `envelopeOut.valid` and `envelopeOutSigned.valid` follow the state of `phaseTick` synchronously with zero clock cycle delay.
+##### 1.9.4 Sample Rate Flow Gating Validation
+* **Action**: Toggle `phaseTick` between `True` and `False` while checking the output validity.
+* **Assertion**: Verify that both `envelopeOut.valid` and `envelopeOutSigned.valid` follow the state of `phaseTick` synchronously with a 1 clock cycle pipeline latency (`RegNext` propagation delay).
 
 ---
 
 ## 2. Integration Tests
 
+---
+
 This chapter contains the specifications for verifying multi-module and full-system interactive integration behavior.
+
+---
 
 ### 2.1 Complete System Integration Test (`SynthSim`)
 
@@ -474,11 +490,16 @@ Verifies the end-to-end synthesizer system (`Synth`) for seamless hardware modul
   1. Write `0x02` (PWM mode) to Waveform Select (`0x03`).
   2. Write `0x80` (50% Duty cycle) to PWM Width (`0x04`).
   3. Write `0xFF` (Max Volume) to Volume (`0x05`).
-  4. Write atomic DDS Frequency tuning word `0x080000` (Low = `0x00`, Mid = `0x00`, High = `0x08` commit to target $15\text{ kHz}$).
+  4. Write `0x03` (Enable Envelope + Gate ON) to Envelope Control (`0x40`).
+  5. Write `0x00` (Attack = 0) to Envelope Attack (`0x41`).
+  6. Write `0x00` (Decay = 0) to Envelope Decay (`0x42`).
+  7. Write `0x80` (Sustain = 128) to Envelope Sustain (`0x43`).
+  8. Write atomic DDS Frequency tuning word `0x080000` (Low = `0x00`, Mid = `0x00`, High = `0x08` commit to target $15\text{ kHz}$).
 * **Assertion**: Capture 25 I2S frames and verify:
   - **Stereo Alignment**: Left and Right samples are perfectly identical for all frames.
-  - **Dynamic Audio Response**: Outputs are no longer silent (non-zero PWM waves are generated).
-  - **DSP Correctness**: Non-zero sample values transition perfectly between peak positive (`32639`) and peak negative (`-32640`) values, demonstrating a true 50% duty-cycle PWM square wave swinging at $15\text{ kHz}$.
+  - **Dynamic Audio Response & Envelope Modulation**: Outputs are no longer silent, and sample amplitudes scale dynamically bound under the active ADSR envelope within maximum absolute peaks (`<= 32609`), with absolute values scaling up successfully over time (`> 5000`).
+
+---
 
 ### 2.2 Complete Envelope Generator Integration Test (`EnvelopeGeneratorSim`)
 
@@ -517,10 +538,11 @@ Verifies the integration of the three submodules, validating the complete 3-cycl
   - **Release Stage:** The output fades monotonically back to `0`.
 
 ##### 2.2.3 Pipeline Latency & Sustain Clamping Sync (Standard Test)
-* **Action**: Trigger `Gate ON` at Cycle 0. Drive `phaseTick = True` continuously. Step cycle-by-cycle as FSM transitions from `DECAY` to `SUSTAIN` with sustain configured to `0x80` (`512`).
+* **Action**: Trigger `Gate ON` at Cycle 0. Drive `phaseTick = True` continuously. Step cycle-by-cycle as FSM transitions from `IDLE` to `ATTACK` with `attack = 0` (fastest rise).
 * **Assertion**: Verify that:
-  - The first non-zero output value appears exactly at **Cycle 3** (verifying the 3-cycle data pipeline).
-  - The output transition from `DECAY` to `SUSTAIN` occurs exactly 3 cycles after the FSM state changes, proving that `Stage_Delay` matches the pipeline delay perfectly and eliminates any premature clamping spikes or drops.
+  - The FSM transitions and resets the accumulator to `0` at **Cycle 2**.
+  - The shaper outputs exactly `0` at **Cycle 3** (verifying the 1-cycle register pipeline of the shaper on top of the accumulator register).
+  - The output climbs above `0` after exactly **Cycle 50**, proving the high-precision phase accumulator crosses the first LSB scaling threshold correctly.
 
 ##### 2.2.4 Simultaneous Gate and Sync Conflict (Edge Case Test)
 * **Action**: Pulse both `Gate ON` and `syncIn` High in the exact same master clock cycle.
@@ -541,7 +563,11 @@ Verifies the integration of the three submodules, validating the complete 3-cycl
 
 ## Appendix: SpinalSim Best Practices for Reset Verification
 
+---
+
 This appendix documents the architectural and simulation best practices for implementing and verifying reset stability across all `spinalSynth` modules. It serves as a mandatory guideline for pair-programming, design patterns, and testbench implementations to prevent simulator hangs and race conditions.
+
+---
 
 ### A.1 The Verilator Combinational Loop Problem (FSM Gating)
 
@@ -588,6 +614,8 @@ io.resetAccum := fsmResetAccum && !ClockDomain.current.isResetActive
 ```
 This guarantees that outputs remain strictly quiet during reset without introducing feedback loops into Verilator's next-state logic solver.
 
+---
+
 ### A.2 Thread-Safe Reset Verification via `forkStimulus` Startup
 
 > [!NOTE]
@@ -624,6 +652,8 @@ test("Module unit test - reset & transitions") {
   }
 }
 ```
+
+---
 
 ### A.3 State Transition Synchronization (Delta-Cycle Waiting)
 

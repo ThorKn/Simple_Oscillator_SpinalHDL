@@ -396,6 +396,8 @@ accumulator.io.resetAccum   := ctrl.io.resetAccum
 accumulator.io.runAccum     := ctrl.io.runAccum
 accumulator.io.accumDir     := ctrl.io.accumDir
 accumulator.io.phaseInc     := ctrl.io.phaseInc
+accumulator.io.sustainLevel := io.config.sustain
+accumulator.io.activeStage  := ctrl.io.activeStage
 ctrl.io.segmentDone         := accumulator.io.segmentDone
 
 // Connecting Accumulator and Ctrl to Shaper
@@ -405,6 +407,7 @@ shaper.io.fraction     := accumulator.io.fraction
 shaper.io.curveSelect  := ctrl.io.curveSelect
 shaper.io.sustainLevel := io.config.sustain
 shaper.io.activeStage  := ctrl.io.activeStage
+shaper.io.accumDir     := ctrl.io.accumDir
 
 // Top-Level Outputs
 io.envelopeOut       <> shaper.io.envelopeOut
@@ -433,8 +436,8 @@ class EnvelopeCtrl extends Component {
     val phaseInc    = out UInt(22 bits)
 
     // Outputs to Shaper
-    val curveSelect  = out UInt(2 bits)
-    val activeStage  = out UInt(3 bits)       // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
+    val curveSelect = out UInt(2 bits)
+    val activeStage = out UInt(3 bits)       // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
   }
 }
 ```
@@ -466,17 +469,17 @@ It controls the envelope stages using five main states:
 
 * **IDLE (Stage 0):** The default idle state. A `Gate ON` trigger resets the accumulator and transitions the FSM to `ATTACK`.
 * **ATTACK (Stage 1):** The phase accumulator counts forward. If `Gate OFF` is detected, it transitions to `RELEASE`. When the segment completes (accumulator hits 1023), it resets the accumulator and transitions to `DECAY`.
-* **DECAY (Stage 2):** The phase accumulator counts forward. If `Gate OFF` is detected, it transitions to `RELEASE`. When the segment completes, it transitions to `SUSTAIN` (or loops back to `ATTACK` if Looping/LFO mode is active).
-* **SUSTAIN (Stage 3):** The accumulator is paused, holding the output at the configured sustain level. A `Gate OFF` trigger resets the accumulator and transitions the FSM to `RELEASE`.
-* **RELEASE (Stage 4):** The phase accumulator counts forward. If `Gate ON` is triggered, it resets the accumulator and transitions to `ATTACK`. When the segment completes, it transitions back to `IDLE`.
+* **DECAY (Stage 2):** The phase accumulator counts reverse (downwards). If `Gate OFF` is detected, it transitions to `RELEASE`. When the segment completes (baseIndex counts down to match/cross below `sustainLevel`), it transitions to `SUSTAIN` (or loops back to `ATTACK` if Looping/LFO mode is active).
+* **SUSTAIN (Stage 3):** The accumulator is paused, naturally holding the output at the configured sustain level. A `Gate OFF` trigger resets the accumulator and transitions the FSM to `RELEASE`.
+* **RELEASE (Stage 4):** The phase accumulator counts reverse (downwards). If `Gate ON` is triggered, it resets the accumulator and transitions to `ATTACK`. When the segment underflows to `0`, it transitions back to `IDLE`.
 
 #### Playback & Sync Controller
 * **Looping (LFO Mode):** When `config.ctrl[2]` (Loop Enable) is active, transitioning out of `DECAY` loops instantly back to `ATTACK` instead of going to `SUSTAIN`.
-* **Reverse Mode:** When `config.ctrl[4]` is active, the accumulator direction is inverted (`accumDir := True`), altering the counting sequence.
-* **Ping-Pong Mode:** When `config.ctrl[3]` is active, a forward segment completion triggers a reverse segment immediately on the same stage before transitioning states.
+* **Reverse Mode (Reserved Placeholder):** Config register `config.ctrl[4]` is reserved for future expansion; bypassed in current active RTL.
+* **Ping-Pong Mode (Reserved Placeholder):** Config register `config.ctrl[3]` is reserved for future expansion; bypassed in current active RTL.
 * **Sync Logic:**
   * **Hard Sync:** A rising edge on `syncIn` forces the FSM back to `ATTACK` and sets `resetAccum := True`.
-  * **MIDI Sync:** When enabled, the phase increment `phaseInc` is scaled according to incoming `midiClock` ticks rather than the default time register mapping.
+  * **MIDI Sync (Reserved Placeholder):** Port `midiClock` is a placeholder for future tempo-synced clock divisions.
 
 #### Logarithmic Time-to-Increment Lookup Table (ROM)
 Calculating the logarithmic time-duration mapping at runtime requires expensive divisor blocks. To ensure ASIC portability, the 256 increment coefficients are computed in Scala at compile-time and instantiated as a static hardware ROM (`Mem` in SpinalHDL).
@@ -499,17 +502,19 @@ val rom = Mem(UInt(22 bits), 256) init(lutContent)
 ### 6.3 EnvelopeAccumulator
 
 #### Purpose
-The `EnvelopeAccumulator` is a high-speed 32-bit digital register that acts as the phase counter. It increments on every 24 MHz system clock cycle when enabled, driving the envelope's progress through time.
+The `EnvelopeAccumulator` is a high-speed 32-bit digital register that acts as the phase counter. It increments (or decrements) on every 24 MHz system clock cycle when enabled, driving the envelope's progress through time.
 
 #### IO Bundle
 ```scala
 class EnvelopeAccumulator extends Component {
   val io = new Bundle {
     // Inputs from Control Unit
-    val resetAccum  = in Bool()
-    val runAccum    = in Bool()
-    val accumDir    = in Bool()               // 0 = Forward (Up), 1 = Reverse (Down)
-    val phaseInc    = in UInt(22 bits)
+    val resetAccum   = in Bool()
+    val runAccum     = in Bool()
+    val accumDir     = in Bool()               // 0 = Forward (Up), 1 = Reverse (Down)
+    val phaseInc     = in UInt(22 bits)
+    val sustainLevel = in UInt(8 bits)
+    val activeStage  = in UInt(3 bits)
 
     // Outputs
     val segmentDone = out Bool()              // Boundary completion pulse
@@ -529,10 +534,11 @@ class EnvelopeAccumulator extends Component {
 * **Output Splitting:**
   * `io.baseIndex := accum(31 downto 24)`
   * `io.fraction  := accum(23 downto 22)`
-* **Segment Boundaries & Done Detection:**
-  * In **Forward Mode**, completion is hit when the accum register overflows (wraps past 32-bit maximum).
-  * In **Reverse Mode**, completion is hit when the accum register underflows (wraps past 0).
-  * `io.segmentDone := (Forward && overflow) || (Reverse && underflow)`
+* **Segment Boundaries & Target Done Detection:**
+  * In **Attack (Stage 1)**, completion is hit when the accum register overflows (wraps past 32-bit maximum).
+  * In **Decay (Stage 2)**, completion is hit when `baseIndex` counts down to match or cross below `sustainLevel` (`baseIndex <= sustainLevel`).
+  * In **Release (Stage 4)**, completion is hit when the accum register underflows (`baseIndex` reaching `0`).
+  * `segmentDone := isAttackDone || isDecayDone || isReleaseDone`
 
 ### 6.4 EnvelopeShaper
 
@@ -549,6 +555,7 @@ class EnvelopeShaper extends Component {
     val curveSelect  = in UInt(2 bits)        // 00=Lin, 01=Exp, 10=Log, 11=S-Curve
     val sustainLevel = in UInt(8 bits)
     val activeStage  = in UInt(3 bits)
+    val accumDir     = in Bool()
 
     // Output flows
     val envelopeOut       = master(Flow(UInt(10 bits)))
@@ -574,7 +581,11 @@ val sigRom = Mem(UInt(8 bits), 257) init(sigContent)
 
 #### Multiplierless Hybrid 8+2 Linear Interpolation
 Linear interpolation requires the formula: `Y = Y0 + (f / 4) * (Y1 - Y0)`.
-To prevent expensive synthesis of physical multipliers on custom silicon, the fraction multiplication `(f/4) * delta_Y` is resolved in combinational shift-add structures based on the 2 fractional bits:
+To prevent expensive synthesis of physical multipliers on custom silicon, the fraction multiplication `(f/4) * delta_Y` is resolved in combinational shift-add structures.
+
+* **Fraction Mirroring**: When counting backwards (`accumDir = 1`), the fractional step is mirrored combinationally:
+  `fractionAdjusted = accumDir ? (3 - fraction) : fraction`
+  This ensures that linear transitions remain perfectly continuous and smooth in reverse:
 
 ```scala
 val y0 = UInt(8 bits)
@@ -599,7 +610,7 @@ val y0Shifted    = (y0Signed << 2).resize(12 bits) // Y0 * 4
 val deltaShifted = (delta << 1).resize(12 bits)   // 2 * delta
 val deltaResized = delta.resize(12 bits)
 
-switch(io.fraction) {
+switch(fractionAdjusted) {
   is(0) { interp := y0Shifted }
   is(1) { interp := y0Shifted + deltaResized }
   is(2) { interp := y0Shifted + deltaShifted }
@@ -626,7 +637,7 @@ val finalValUnipolar = interp.asUInt.resize(10 bits)
 
 To ensure hardware timing closure at 24 MHz and robust, glitch-free control transitions, the Envelope Generator architecture isolates data lookup, mathematical computation, and control registers into dedicated synchronous pipeline stages.
 
-The design implements three distinct hardware signal chains:
+The design implements two distinct hardware signal chains:
 
 ```text
                +-------------------------------------------------+
@@ -636,17 +647,16 @@ The design implements three distinct hardware signal chains:
                                                            │
                                                            v
                +-------------------------------------------┼-----+
-               | 2. Forward Lookup Math Chain              │     |
+               | 2. Math & Output Pipeline Math Chain      │     |
   24MHz Clk ──>| [Accumulator (T0)] ──> [ROM Lookup (T1)] ─┼──┐  |
                |                                           │  │  |
                |                                           v  │  |
-               | [Stage_Delay (T0-T2)] <───────────────────┘  │  |
-               |     │ (Match latency)                        │  |
-               |     v                                        v  |
-               | [Sustain Clamping] <── [Shift-Add Interp (T2)]  |
-               |     │                                           |
-               |     v                                           |
-               | [Output Register (T3)] ──────> envelopeOut      |
+               |                                              │  |
+               |                                              v  |
+               |                       [Shift-Add Interp (T2)]   |
+               |                            │                    |
+               |                            v                    |
+               |                       [Output Register (T3)]    |
                +-------------------------------------------------+
 ```
 
@@ -660,16 +670,11 @@ This path synchronizes asynchronous external controls and propagates internal re
 
 #### 6.5.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
 This is the core mathematical flow designed to maintain a 24 MHz clock cycle bound through registered cells:
-* **T0 (Accumulation Stage):** The 32-bit register `accum` increments by `phaseInc`. The split base index and fraction bits are output stable.
+* **T0 (Accumulation Stage):** The 32-bit register `accum` increments (or decrements) by `phaseInc`. The split base index and fraction bits are output stable.
 * **T1 (ROM Lookup Stage):** The 8-bit index addresses the dual boundary ports `LUT[x]` and `LUT[x+1]`. The memory array lookup requires **1 clock cycle** to fetch and settle output registers.
 * **T2 (Arithmetic Stage):** The combinational multiplexed shift-add interpolator evaluates `Y = Y0 + (f/4) * delta_Y` instantly.
 * **T3 (Output Stage):** To isolate critical routing paths, the final unipolar and bipolar amplitude values are registered to the physical output ports and qualified with `phaseTick`.
   * *Total Forward Latency:* **3 clock cycles** (fully balanced).
-
-#### 6.5.3 Chain 3: Sustain Stage Delay Matching (`sustain` -> Output Clamping)
-During the `SUSTAIN` state, the envelope holds its output at the static sustain value rather than accumulating with the phaseInc.
-* **The Early Transition Problem:** Because the math pipeline has a **3-cycle latency**, if the FSM immediately switches the output to the static `sustainLevel` value upon entering the `SUSTAIN` state, the output port will jump to the sustain value **3 cycles too early**, truncating the final decay data points still traversing the pipeline!
-* **The Solution (Delay Matching):** The active state indicators (like `activeStage` and FSM state controls) are routed through a **3-stage shift register pipeline** (`Stage_Delay`) inside the Shaper. This delays the sustain clamping multiplexer switch by exactly **3 cycles**, matching the lookup pipeline latency and ensuring a perfectly seamless, glitch-free decay-to-sustain transition.
 
 ---
 
