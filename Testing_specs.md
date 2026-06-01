@@ -272,6 +272,100 @@ Verifies the end-to-end synthesizer system (`Synth`) for seamless hardware modul
   - **Dynamic Audio Response**: Outputs are no longer silent (non-zero PWM waves are generated).
   - **DSP Correctness**: Non-zero sample values transition perfectly between peak positive (`32639`) and peak negative (`-32640`) values, demonstrating a true 50% duty-cycle PWM square wave swinging at $15\text{ kHz}$.
 
+---
+
+## Appendix: SpinalSim Best Practices for Reset Verification
+
+This appendix documents the architectural and simulation best practices for implementing and verifying reset stability across all `spinalSynth` modules. It serves as a mandatory guideline for pair-programming, design patterns, and testbench implementations to prevent simulator hangs and race conditions.
+
+### A.1 The Verilator Combinational Loop Problem (FSM Gating)
+
+> [!NOTE]
+> The code examples in this section are drawn directly from the real-world production implementation of the EnvelopeCtrl.scala control module in this repository.
+
+When implementing Finite State Machines (FSMs) or control units, it is common to want control outputs (like `resetAccum` or `runAccum`) to be strictly held inactive (`False` or `0`) during a system reset, even if input trigger signals shift.
+
+#### The Anti-Pattern (Cyclic Feedback Loop)
+A naive approach is to qualify combinational FSM inputs directly with the reset signal:
+```scala
+val gateOn = io.config.ctrl(1) && !ClockDomain.current.isResetActive
+
+IDLE.whenIsActive {
+  when(gateOn) {
+    io.resetAccum := True
+    goto(ATTACK)
+  }
+}
+```
+* **Why it fails in simulation:** Verilator compiles SpinalHDL's FSM logic into a Verilog state machine. The state register is reset by the `reset` wire. Gating the combinational input paths (like `gateOn`) with the reset signal creates a cyclic dependency graph (Reset -> Inputs -> Next State -> State Register -> Reset). When manual resets are held active under complex inputs, Verilator's runtime solver enters an **infinite combinational evaluation loop**, hanging the simulation at 100% CPU.
+
+#### The Best-Practice Pattern (Output-Only Reset Gating)
+Always keep the FSM inputs and transitions combinationally independent of the reset signal. Instead, use intermediate combinational wires for FSM actions, and apply a **unidirectional output gate** at the top level:
+```scala
+// 1. Keep inputs combinationally clean
+val gateOn = io.config.ctrl(1)
+
+// 2. FSM drives internal outputs
+val fsmResetAccum = Bool()
+fsmResetAccum := False
+
+val fsm = new StateMachine {
+  IDLE.whenIsActive {
+    when(gateOn) {
+      fsmResetAccum := True
+      goto(ATTACK)
+    }
+  }
+}
+
+// 3. Gate the final outputs combinationally with reset (Unidirectional)
+io.resetAccum := fsmResetAccum && !ClockDomain.current.isResetActive
+```
+This guarantees that outputs remain strictly quiet during reset without introducing feedback loops into Verilator's next-state logic solver.
+
+### A.2 Thread-Safe Reset Verification via `forkStimulus` Startup
+
+> [!NOTE]
+> The verification methodologies documented in this section were developed to address concurrent simulation conflicts during the test of [EnvelopeCtrlSim](file:///home/moss/Documents/hardware/AI_Audio_HW/spinalSynth/src/test/scala/synth/envelope/EnvelopeCtrlSim.scala).
+
+SpinalSim's `clockDomain.forkStimulus(period)` automatically spawns an asynchronous background thread that drives the master clock and manages the initial power-on reset lifecycle (asserting reset at $t=0$, holding it active, and deasserting it after a few nanoseconds).
+
+#### The Anti-Pattern (Concurrent Thread Collision)
+Manually calling `assertReset()` and `deassertReset()` mid-simulation in the main test thread while the background `forkStimulus` thread is running leads to silent overwrites. The background thread will wake up on a timer and deassert the reset pin behind our back, causing stable active-reset assertions to fail.
+
+#### The Best-Practice Pattern (Startup Window Assertion)
+Verify reset stability strictly during **Cycle 1** of the simulation, leveraging the built-in startup reset phase. This is thread-safe, robust, and represents realistic power-on hardware behavior:
+
+```scala
+test("Module unit test - reset & transitions") {
+  SimConfig.withWave.compile(new MyModule).doSim { dut =>
+    // 1. Initialize clock and let forkStimulus automatically manage reset
+    dut.clockDomain.forkStimulus(period = 10)
+
+    // 2. Set safe defaults for all inputs
+    dut.io.trigger #= false
+    // ...
+
+    // 3. Wait exactly 1 clock cycle to stabilize the simulator delta-cycles
+    dut.clockDomain.waitSampling()
+
+    // 4. Assert that outputs are strictly quiet under active startup reset
+    assert(!dut.io.controlOut.toBoolean, "Outputs must remain False during active reset")
+
+    // 5. Let the automatic startup reset complete completely and stabilize
+    dut.clockDomain.waitSampling(20)
+    
+    // 6. Proceed with normal state transitions...
+  }
+}
+```
+
+### A.3 State Transition Synchronization (Delta-Cycle Waiting)
+
+Because simulator input changes (via `#=`) are scheduled combinationally, and `waitSampling()` unblocks precisely on the rising clock edge, FSM register state propagation can sometimes span across a delta-cycle.
+
+* **Rule of Thumb:** Always use a **2-cycle wait** (`waitSampling(2)`) or an additional stabilizing cycle after asserting inputs before verifying next-state registered outputs (like `activeStage`).
+* **Pulse Duration Rule:** For edge-sensitive pulses (like `segmentDone`), keep the signal high for **exactly 1 cycle** (`waitSampling()`) and immediately pull it low before waiting for the transition to settle, avoiding double-transitions through multiple states.
 
 
 

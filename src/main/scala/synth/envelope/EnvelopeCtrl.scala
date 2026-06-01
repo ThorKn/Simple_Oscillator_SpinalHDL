@@ -24,8 +24,8 @@ class EnvelopeCtrl extends Component {
     val activeStage  = out UInt(3 bits)       // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
   }
 
-  // Gate input is mapped to bit 1 of the ctrl register (qualified to remain False during active reset)
-  val gateOn = io.config.ctrl(1) && !ClockDomain.current.isResetActive
+  // Gate input is mapped to bit 1 of the ctrl register
+  val gateOn = io.config.ctrl(1)
 
   // -------------------------------------------------------------------------
   // Logarithmic Increment ROM Mapping (256 words x 22 bits)
@@ -68,6 +68,10 @@ class EnvelopeCtrl extends Component {
   // -------------------------------------------------------------------------
   // ADSR State Machine (built-in spinal.lib.fsm)
   // -------------------------------------------------------------------------
+  val fsmResetAccum  = Bool()
+  val fsmRunAccum    = Bool()
+  val fsmActiveStage = UInt(3 bits)
+
   val fsm = new StateMachine {
     val IDLE    = new State with EntryPoint
     val ATTACK  = new State
@@ -76,47 +80,47 @@ class EnvelopeCtrl extends Component {
     val RELEASE = new State
 
     // Default outputs driven from FSM
-    io.resetAccum  := False
-    io.runAccum    := False
-    io.activeStage := 0
+    fsmResetAccum  := False
+    fsmRunAccum    := False
+    fsmActiveStage := 0
 
     IDLE.whenIsActive {
-      io.activeStage := 0
+      fsmActiveStage := 0
       when(gateOn) {
-        io.resetAccum := True
-        io.runAccum   := True
+        fsmResetAccum := True
+        fsmRunAccum   := True
         goto(ATTACK)
       }
     }
 
     ATTACK.whenIsActive {
-      io.activeStage := 1
-      io.runAccum    := True
+      fsmActiveStage := 1
+      fsmRunAccum    := True
       when(hardSyncPulse) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(RELEASE)
       } elsewhen(io.segmentDone) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(DECAY)
       }
     }
 
     DECAY.whenIsActive {
-      io.activeStage := 2
-      io.runAccum    := True
+      fsmActiveStage := 2
+      fsmRunAccum    := True
       when(hardSyncPulse) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(RELEASE)
       } elsewhen(io.segmentDone) {
         // If Loop Mode (ctrl[2]) is active, loop back to Attack
         when(io.config.ctrl(2)) {
-          io.resetAccum := True
+          fsmResetAccum := True
           goto(ATTACK)
         } otherwise {
           goto(SUSTAIN)
@@ -125,28 +129,33 @@ class EnvelopeCtrl extends Component {
     }
 
     SUSTAIN.whenIsActive {
-      io.activeStage := 3
+      fsmActiveStage := 3
       when(hardSyncPulse) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(RELEASE)
       }
     }
 
     RELEASE.whenIsActive {
-      io.activeStage := 4
-      io.runAccum    := True
+      fsmActiveStage := 4
+      fsmRunAccum    := True
       when(hardSyncPulse) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(gateOn) {
-        io.resetAccum := True
+        fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(io.segmentDone) {
         goto(IDLE)
       }
     }
   }
+
+  // Gate outputs combinationally with current active reset status
+  io.resetAccum  := fsmResetAccum && !ClockDomain.current.isResetActive
+  io.runAccum    := fsmRunAccum && !ClockDomain.current.isResetActive
+  io.activeStage := ClockDomain.current.isResetActive ? U(0, 3 bits) | fsmActiveStage
 }
