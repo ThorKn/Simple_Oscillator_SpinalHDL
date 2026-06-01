@@ -5,6 +5,7 @@ import spinal.lib._
 
 import synth.uart._
 import synth.oscillator.Oscillator
+import synth.envelope.EnvelopeGenerator
 import synth.output._
 import synth.mixing.Attenuator
 import synth.timing.TimingGenerator
@@ -43,6 +44,8 @@ class Synth extends Component {
     // Synthesis and Output Modules
     val timingGen         = new TimingGenerator()
     val oscillator        = new Oscillator()
+    val envGen            = new EnvelopeGenerator()
+    val envAttenuator     = new Attenuator(volumeWidth = 10)
     val attenuator        = new Attenuator()
     val decimator         = new Decimator()
     val transmitter       = new I2STransmitter()
@@ -52,18 +55,26 @@ class Synth extends Component {
 
     // --- Synthesis Engine Wiring ---
 
-    // 1. Tick Distribution
+    // 1. Tick & Control Distribution
     oscillator.io.phaseTick        := timingGen.io.phaseTick
-    val alignedSampleTick          = Delay(timingGen.io.sampleTick, cycleCount = 1)
+    envGen.io.phaseTick            := timingGen.io.phaseTick
+    envGen.io.syncIn               := False
+    envGen.io.midiClock            := False
+
+    val alignedSampleTick          = Delay(timingGen.io.sampleTick, cycleCount = 2)
     decimator.io.sampleTick        := alignedSampleTick
 
     // 2. Control Signals (UART Subsystem -> Synth Engine)
     oscillator.io.config           := uart.io.config
+    envGen.io.config               := uart.io.envConfig
+    val envBypassed = !uart.io.envConfig.ctrl(0)
+    envAttenuator.io.volume        := envBypassed ? U(1023, 10 bits) | envGen.io.envelopeOut.payload
     attenuator.io.volume           := uart.io.config.volume
 
     // 3. Audio Data Path
-    // Oscillator (480kHz) -> Attenuator -> Decimator -> I2S Transmitter (48kHz)
-    oscillator.io.sample           >> attenuator.io.sampleIn
+    // Oscillator (480kHz) -> Envelope Attenuator -> Master Volume Attenuator -> Decimator -> I2S Transmitter (48kHz)
+    oscillator.io.sample           >> envAttenuator.io.sampleIn
+    envAttenuator.io.sampleOut     >> attenuator.io.sampleIn
     attenuator.io.sampleOut        >> decimator.io.sampleIn
     decimator.io.sampleOut         >> transmitter.io.sampleIn
 

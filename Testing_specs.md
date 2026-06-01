@@ -2,6 +2,26 @@
 
 This document provides the formal specifications for the simulation test suite in `spinalSynth`. It defines the verification logic, simulated environments, stimulus parameters, and assertion constraints for all unit and integration testbenches.
 
+## Table of Contents
+
+1. Unit Tests
+   - 1.1 Attenuator Unit Test (`AttenuatorSim`)
+   - 1.2 Register Bank Unit Test (`RegisterBankSim`)
+   - 1.3 UART Protocol Decoder Unit Test (`UartProtocolDecoderSim`)
+   - 1.4 Timing Generator Unit Test (`TimingSim`)
+   - 1.5 Waveform Generator Unit Test (`WaveformSim`)
+   - 1.6 I2S Transmitter Unit Test (`I2STransmitterSim`)
+   - 1.7 Envelope Control Unit Test (`EnvelopeCtrlSim`)
+   - 1.8 Envelope Phase Accumulator Unit Test (`EnvelopeAccumulatorSim`)
+   - 1.9 Envelope Waveshaper Unit Test (`EnvelopeShaperSim`)
+2. Integration Tests
+   - 2.1 Complete System Integration Test (`SynthSim`)
+   - 2.2 Complete Envelope Generator Integration Test (`EnvelopeGeneratorSim`)
+3. Appendix: SpinalSim Best Practices for Reset Verification
+   - A.1 The Verilator Combinational Loop Problem (FSM Gating)
+   - A.2 Thread-Safe Reset Verification via `forkStimulus` Startup
+   - A.3 State Transition Synchronization (Delta-Cycle Waiting)
+
 ---
 
 ## 1. Unit Tests
@@ -11,7 +31,7 @@ This chapter contains the specifications for testing individual, isolated hardwa
 ### 1.1 Attenuator Unit Test (`AttenuatorSim`)
 
 #### Purpose
-Verifies the custom DSP volume attenuator module (`Attenuator`) for mathematical precision, pipeline latency, and reset stability.
+Verifies the custom DSP volume attenuator module (`Attenuator`) across default 8-bit and parameterized 10-bit configurations for mathematical precision, pipeline latency, and reset stability.
 
 #### Simulated Environment
 * **Component Under Test**: `Attenuator`
@@ -20,7 +40,7 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) for mathematical
 
 #### Input Stimulus & Signals
 * `io.sampleIn`: `Flow[SInt]` (16 bits)
-* `io.volume`: `UInt` (8 bits)
+* `io.volume`: `UInt` (volumeWidth bits)
 * `io.sampleOut`: `Flow[SInt]` (16 bits)
 
 #### Test Cases
@@ -32,11 +52,13 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) for mathematical
 ##### 1.1.2 Mathematical Scaling
 * **Action**: Pulse `io.sampleIn.valid` high for 1 clock cycle with a specific payload and volume, then return it to `False`. Wait 1 clock cycle for the pipeline register.
 * **Assertion**: Verify that `io.sampleOut.valid` is `True` during the second cycle and its payload matches the expected fractional attenuation exactly:
-  $$\text{expected} = \frac{\text{sampleIn.payload} \times \text{volume}}{256}$$
-* **Test Vectors**:
+  ```text
+  expected = (sampleIn.payload * volume) / (2^volumeWidth)
+  ```
+* **Test Vectors (8-bit Default)**:
   | Input Sample | Volume | Expected Output | Notes |
   |---|---|---|---|
-  | `20000` | `255` | `19921` | Full scale fractional ($19921.8$ truncated) |
+  | `20000` | `255` | `19921` | Full scale fractional (19921.8 truncated) |
   | `20000` | `128` | `10000` | Half scale (Exact) |
   | `-20000` | `64` | `-5000` | Quarter scale negative |
   | `-32768` | `0` | `0` | Silent (Mute) |
@@ -54,6 +76,27 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) for mathematical
   * Cycle 5: `sampleOut.valid` is `False`.
   * This confirms the 1-cycle pipeline throughput operates continuously without stalls or register leakage.
 
+##### 1.1.4 Parameterized 10-bit Configuration
+* **Action**: Instantiate the unit under test with `volumeWidth = 10`.
+* **Test Vectors**:
+  | Input Sample | Volume | Expected Output | Notes |
+  |---|---|---|---|
+  | `20000` | `1023` | `19980` | Full scale fractional (20000 * 1023 / 1024) |
+  | `20000` | `512` | `10000` | Half scale (Exact) |
+  | `-20000` | `256` | `-5000` | Quarter scale negative |
+  | `-32768` | `0` | `0` | Silent (Mute) |
+* **Pipelined Throughput Test**:
+  * Cycle 1: Sample = `10000`, Volume = `1023`
+  * Cycle 2: Sample = `20000`, Volume = `512`
+    * *Assertion*: `sampleOut.valid` is `True`, payload = `9990`.
+  * Cycle 3: Sample = `-10000`, Volume = `256`
+    * *Assertion*: `sampleOut.valid` is `True`, payload = `10000`.
+  * Cycle 4: Idle (`sampleIn.valid` is `False`)
+    * *Assertion*: `sampleOut.valid` is `True`, payload = `-2500`.
+  * Cycle 5: Idle
+    * *Assertion*: `sampleOut.valid` is `False`.
+  * This confirms scaling math updates automatically based on `volumeWidth`.
+
 ---
 
 ### 1.2 Register Bank Unit Test (`RegisterBankSim`)
@@ -69,12 +112,13 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
 #### Input Stimulus & Signals
 * `io.regWrite`: `Flow[RegisterWrite]` (containing 8-bit `address` and 8-bit `data`)
 * `io.config`: `OscillatorConfig` (output bundle containing `freqWord`, `waveSelect`, `pwmWidth`, `volume`)
+* `io.envConfig`: `EnvelopeConfig` (output bundle containing `ctrl`, `attack`, `decay`, `sustain`, `release`, `syncCtrl`, `phaseOffset`)
 
 #### Test Cases
 
 ##### 1.2.1 Reset Defaults
 * **Action**: Start simulation with reset asserted.
-* **Assertion**: Verify that all output configuration fields in `io.config` are held strictly at `0`.
+* **Assertion**: Verify that all output configuration fields in both `io.config` and `io.envConfig` are held strictly at `0`.
 
 ##### 1.2.2 Single-Byte Direct Updates
 * **Action**: Write individually to non-atomic registers using the `io.regWrite` port:
@@ -91,6 +135,24 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
      * *Assertion*: Verify that `config.freqWord` remains unchanged (stages in shadow register).
   3. Write `0x0C` to `0x02` (`FREQ_HIGH`).
      * *Assertion*: Verify that on the next clock cycle, the active output `config.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
+
+##### 1.2.4 Envelope Parameter Updates
+* **Action**: Write individually to all seven envelope registers using `io.regWrite`:
+  - Write `0x15` to `0x40` (`ENV_CTRL`)
+  - Write `0x0A` to `0x41` (`ENV_ATTACK`)
+  - Write `0x1F` to `0x42` (`ENV_DECAY`)
+  - Write `0x80` to `0x43` (`ENV_SUSTAIN`)
+  - Write `0x2C` to `0x44` (`ENV_RELEASE`)
+  - Write `0x05` to `0x45` (`ENV_SYNC_CTRL`)
+  - Write `0xFF` to `0x46` (`ENV_PHASE_OFFSET`)
+* **Assertion**: Verify that the corresponding output fields in `io.envConfig` (`ctrl`, `attack`, `decay`, `sustain`, `release`, `syncCtrl`, `phaseOffset`) are updated to the written values on the next clock cycle.
+
+##### 1.2.5 Address Crosstalk & Channel Isolation
+* **Action**: Perform crosstalk validation across register regions:
+  1. Write arbitrary values to all oscillator registers (`0x00` through `0x05`).
+     * *Assertion*: Verify that all envelope fields in `io.envConfig` remain completely unchanged.
+  2. Write arbitrary values to all envelope registers (`0x40` through `0x46`).
+     * *Assertion*: Verify that all oscillator fields in `io.config` remain completely unchanged.
 
 ---
 
@@ -233,6 +295,152 @@ Verifies the I²S serial audio transmitter module (`I2STransmitter`) for startup
   - The first 8 bit intervals match the cycle-accurate modulation pattern: 16, 16, 15, 16, 16, 15, 16, 15 clock cycles.
   - The full Left/Right stereo frame completes in exactly 500 clock cycles ($48\text{ kHz}$ sampling rate).
 
+### 1.7 Envelope Control Unit Test (`EnvelopeCtrlSim`)
+
+#### Purpose
+Verifies the ADSR state machine FSM built using SpinalHDL's `StateMachine` library, sync trigger propagation, playback direction logic, and compile-time logarithmic parameter-to-increment lookup ROM.
+
+#### Simulated Environment
+* **Component Under Test**: `EnvelopeCtrl`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+#### Input Stimulus & Signals
+* `io.syncIn`: `Bool` (Hard/Soft sync line)
+* `io.midiClock`: `Bool` (MIDI clock division reference)
+* `io.config`: `EnvelopeConfig` (Input registers)
+* `io.segmentDone`: `Bool` (Accumulator target completion)
+* `io.resetAccum`: `Bool` (Output to reset accumulator register)
+* `io.runAccum`: `Bool` (Output to run accumulator register)
+* `io.accumDir`: `Bool` (Output direction)
+* `io.phaseInc`: `UInt` (22 bits, phase step value)
+* `io.curveSelect`: `UInt` (2 bits, curve selector)
+* `io.activeStage`: `UInt` (3 bits, state stage output)
+
+#### Test Cases
+
+##### 1.7.1 Reset Stability
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving random stimulus values on `io.syncIn`, `io.midiClock`, `io.config`, and `io.segmentDone`.
+* **Assertion**: Verify that all control outputs are strictly held at their idle states: `io.resetAccum = False`, `io.runAccum = False`, `io.accumDir = False`, `io.phaseInc = 0`, `io.curveSelect = 0`, and `io.activeStage = 0`.
+
+##### 1.7.2 Normal ADSR State Transitions
+* **Action**: Configure standard parameters and toggle the Gate register bit `config.ctrl[1]`:
+  1. Toggle Gate `Low -> High` while FSM is in `IDLE`.
+     * *Assertion*: FSM transitions to `ATTACK` (activeStage = 1), asserts `resetAccum = True` and `runAccum = True` for 1 cycle.
+  2. Pulse `segmentDone` High for 1 cycle.
+     * *Assertion*: FSM transitions to `DECAY` (activeStage = 2), asserts `resetAccum = True` for 1 cycle.
+  3. Pulse `segmentDone` High for 1 cycle.
+     * *Assertion*: FSM transitions to `SUSTAIN` (activeStage = 3), disables phase tracking (`runAccum = False`).
+  4. Toggle Gate `High -> Low`.
+     * *Assertion*: FSM transitions to `RELEASE` (activeStage = 4), asserts `resetAccum = True` and `runAccum = True` for 1 cycle.
+  5. Pulse `segmentDone` High for 1 cycle.
+     * *Assertion*: FSM transitions back to `IDLE` (activeStage = 0), clears `runAccum = False`.
+
+##### 1.7.3 Gate Interruption & Re-triggering
+* **Action**: Interrupt active phases with unexpected Gate toggles:
+  - Trigger `Gate ON`, transition to `ATTACK`, then toggle `Gate OFF` halfway through.
+    * *Assertion*: FSM transitions instantly to `RELEASE` (activeStage = 4).
+  - Trigger `Gate OFF`, transition to `RELEASE`, then toggle `Gate ON` halfway through.
+    * *Assertion*: FSM transitions instantly to `ATTACK` (activeStage = 1) and resets accumulator (`resetAccum = True`).
+
+##### 1.7.4 Looping (LFO) Mode
+* **Action**: Set Loop Enable register `config.ctrl[2] = True`. Trigger `Gate ON`. Allow FSM to transition through `ATTACK` to `DECAY`. Pulse `segmentDone` High.
+* **Assertion**: Verify that FSM transitions instantly from `DECAY` back to `ATTACK` (activeStage = 1) instead of going to `SUSTAIN`, resetting the accumulator cleanly.
+
+##### 1.7.5 Logarithmic Increment ROM Mapping
+* **Action**: Write specific values to the `attack` register and read `phaseInc` outputs:
+  - Write `ENV_ATTACK = 0` (minimum rate parameter).
+    * *Assertion*: Verify `phaseInc` is exactly `357914` (0x05761A), yielding a 0.5 ms transient.
+  - Write `ENV_ATTACK = 255` (maximum rate parameter).
+    * *Assertion*: Verify `phaseInc` is exactly `6` (0x000006), yielding a 30.0 s transient.
+
+---
+
+### 1.8 Envelope Phase Accumulator Unit Test (`EnvelopeAccumulatorSim`)
+
+#### Purpose
+Verifies the 32-bit register accumulator, phase counting direction, split output mapping, and segment overflow boundaries.
+
+#### Simulated Environment
+* **Component Under Test**: `EnvelopeAccumulator`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+#### Input Stimulus & Signals
+* `io.resetAccum`: `Bool`
+* `io.runAccum`: `Bool`
+* `io.accumDir`: `Bool` (0 = Forward, 1 = Reverse)
+* `io.phaseInc`: `UInt` (22 bits)
+* `io.segmentDone`: `Bool` (Output complete)
+* `io.baseIndex`: `UInt` (8 bits, output address)
+* `io.fraction`: `UInt` (2 bits, output fraction)
+
+#### Test Cases
+
+##### 1.8.1 Reset Defaults
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving arbitrary inputs on `runAccum = True`, `accumDir = True`, and `phaseInc = 0x200000` (valid 22-bit value).
+* **Assertion**: Verify that the internal phase register remains strictly at `0`, outputting `baseIndex = 0`, `fraction = 0`, and `segmentDone = False`.
+
+##### 1.8.2 Phase Accumulation & Splitting Precision
+* **Action**: Drive `phaseInc = 0x200000` ($2^{21}$). Enable the accumulator.
+* **Assertion**: Verify the splitting output precision:
+  - Cycle 1: `baseIndex = 0`, `fraction = 0`.
+  - Cycle 2: `baseIndex = 0`, `fraction = 1`.
+  - Cycle 3: `baseIndex = 0`, `fraction = 1`.
+  - Cycle 4: `baseIndex = 0`, `fraction = 2`.
+  - Also verify fraction-only tracking with `phaseInc = 0x200000` using a 2-cycle wait over 3 steps (each step increments `fraction` by exactly `1`).
+
+##### 1.8.3 Forward Wrap Done
+* **Action**: Set `accumDir = False` (Forward), load `phaseInc = 0x200000`. Run for 2048 cycles to wrap the 32-bit accumulator.
+* **Assertion**: Verify that on the 2048th cycle, the register overflows, asserting `segmentDone = True` for exactly 1 cycle.
+
+##### 1.8.4 Reverse Underflow Done
+* **Action**: Assert `resetAccum = True` to clear the counter to `0`. Set `accumDir = True` (Reverse), load `phaseInc = 0x200000`. Enable accumulator.
+* **Assertion**: Verify that on the very first cycle, the counter underflows past zero, asserting `segmentDone = True` instantly for 1 cycle.
+
+---
+
+### 1.9 Envelope Waveshaper Unit Test (`EnvelopeShaperSim`)
+
+#### Purpose
+Verifies the 257-entry LUT curves, shift-add combinational linear interpolation, unipolar-to-bipolar digital scaling, and audio heartbeat gating.
+
+#### Simulated Environment
+* **Component Under Test**: `EnvelopeShaper`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+#### Input Stimulus & Signals
+* `io.phaseTick`: `Bool` (Audio sample gating tick)
+* `io.baseIndex`: `UInt` (8 bits)
+* `io.fraction`: `UInt` (2 bits)
+* `io.curveSelect`: `UInt` (2 bits)
+* `io.sustainLevel`: `UInt` (8 bits)
+* `io.activeStage`: `UInt` (3 bits)
+* `io.envelopeOut`: `Flow[UInt]` (10 bits)
+* `io.envelopeOutSigned`: `Flow[SInt]` (10 bits)
+
+#### Test Cases
+
+##### 1.9.1 Reset Stability
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving active `phaseTick = True` and non-zero inputs.
+* **Assertion**: Verify that output flow streams are strictly quiet and zeroed: `envelopeOut.valid = False`, `envelopeOut.payload = 0`, `envelopeOutSigned.valid = False`, and `envelopeOutSigned.payload = 0`.
+
+##### 1.9.2 Multiplierless Shift-Add Accuracy
+* **Action**: Set `curveSelect = 00` (Linear). Set `baseIndex = 10` (so Y0 = 10, Y1 = 11). Drive different values on `fraction`:
+  - `fraction = 00`: Assert `envelopeOut.payload = 40` (Y0 interpolated scale).
+  - `fraction = 01`: Assert `envelopeOut.payload = 41` (interpolated Y0 + 1/4).
+  - `fraction = 10`: Assert `envelopeOut.payload = 42` (interpolated Y0 + 2/4).
+  - `fraction = 11`: Assert `envelopeOut.payload = 43` (interpolated Y0 + 3/4).
+
+##### 1.9.3 Parallel Bipolar Bitwise Scaling
+* **Action**: Monitor the relationship between unipolar and bipolar outputs across different phase positions.
+* **Assertion**: Verify that `io.envelopeOutSigned.payload` is exactly equal to `(io.envelopeOut.payload ^ 0x200).asSInt`, confirming that the unipolar range (0 to 1023) maps perfectly to the center-zero bipolar range (-512 to +511) without logic delays or arithmetic units.
+
+##### 1.9.4 Sample Rate Flow Validation
+* **Action**: Toggle `phaseTick` between `True` and `False`.
+* **Assertion**: Verify that both `envelopeOut.valid` and `envelopeOutSigned.valid` follow the state of `phaseTick` synchronously with zero clock cycle delay.
+
 ---
 
 ## 2. Integration Tests
@@ -271,6 +479,63 @@ Verifies the end-to-end synthesizer system (`Synth`) for seamless hardware modul
   - **Stereo Alignment**: Left and Right samples are perfectly identical for all frames.
   - **Dynamic Audio Response**: Outputs are no longer silent (non-zero PWM waves are generated).
   - **DSP Correctness**: Non-zero sample values transition perfectly between peak positive (`32639`) and peak negative (`-32640`) values, demonstrating a true 50% duty-cycle PWM square wave swinging at $15\text{ kHz}$.
+
+### 2.2 Complete Envelope Generator Integration Test (`EnvelopeGeneratorSim`)
+
+#### Purpose
+Verifies the integration of the three submodules, validating the complete 3-cycle pipeline latency, and the delay-matched FSM transition timing.
+
+#### Simulated Environment
+* **Component Under Test**: `EnvelopeGenerator`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+#### Input Stimulus & Signals
+* `io.phaseTick`: `Bool`
+* `io.syncIn`: `Bool`
+* `io.midiClock`: `Bool`
+* `io.config`: `EnvelopeConfig`
+* `io.envelopeOut`: `Flow[UInt]`
+* `io.envelopeOutSigned`: `Flow[SInt]`
+
+#### Test Cases
+
+##### 2.2.1 Power-On Reset & Boot Stability (Reset Test)
+* **Action**: Assert active-high `reset` for 10 clock cycles while driving `phaseTick = True`, pulsing `syncIn = True`, and setting random non-zero values on the `config` envelope control parameters.
+* **Assertion**: Verify that throughout the reset duration and for the 3-cycle pipeline latency window following reset deassertion:
+  - Both `envelopeOut.valid` and `envelopeOutSigned.valid` remain strictly `False`.
+  - Both unipolar and bipolar payloads are strictly held at `0`.
+
+##### 2.2.2 Standard ADSR Envelope Playback (Standard Test)
+* **Action**: Configure standard linear ADSR parameters (e.g. `attack = 100`, `decay = 100`, `sustain = 128`, `release = 100`) and drive the playback cycle:
+  1. Pulse Gate register `Low -> High` (ON). Run simulation until FSM hits `SUSTAIN`.
+  2. Pulse Gate register `High -> Low` (OFF). Run simulation until FSM completes the envelope.
+* **Assertion**: Verify the complete envelope profile:
+  - **Attack Stage:** The unipolar output climbs monotonically to peak amplitude `1023`.
+  - **Decay Stage:** The unipolar output decays smoothly to the sustain level of `512` (scaled `0x80`).
+  - **Sustain Stage:** The output remains locked strictly at `512` with zero cycle-to-cycle amplitude drift.
+  - **Release Stage:** The output fades monotonically back to `0`.
+
+##### 2.2.3 Pipeline Latency & Sustain Clamping Sync (Standard Test)
+* **Action**: Trigger `Gate ON` at Cycle 0. Drive `phaseTick = True` continuously. Step cycle-by-cycle as FSM transitions from `DECAY` to `SUSTAIN` with sustain configured to `0x80` (`512`).
+* **Assertion**: Verify that:
+  - The first non-zero output value appears exactly at **Cycle 3** (verifying the 3-cycle data pipeline).
+  - The output transition from `DECAY` to `SUSTAIN` occurs exactly 3 cycles after the FSM state changes, proving that `Stage_Delay` matches the pipeline delay perfectly and eliminates any premature clamping spikes or drops.
+
+##### 2.2.4 Simultaneous Gate and Sync Conflict (Edge Case Test)
+* **Action**: Pulse both `Gate ON` and `syncIn` High in the exact same master clock cycle.
+* **Assertion**: Hard sync must take absolute priority. The internal accumulator must instantly reset to `0` and FSM must immediately restart in the `ATTACK` stage (activeStage = 1).
+
+##### 2.2.5 Ultra-High Frequency Gate Chattering (Irrational Behavior Test)
+* **Action**: Drive the Gate bit rapidly `ON -> OFF -> ON -> OFF` every 2 clock cycles, simulating extreme physical keyboard bouncing or high-frequency automated trigger chatter.
+* **Assertion**: Verify that the envelope generator maintains absolute stability:
+  - The state machine transitions safely without entering illegal states.
+  - No counter wrapping, deadlock, or phase register leakage occurs.
+  - Output values remain strictly bounded within the safe unipolar/bipolar envelopes (0 to 1023) without arithmetic overflow glitches.
+
+##### 2.2.6 Dynamic Mid-Flight Curve Switching (Irrational Behavior Test)
+* **Action**: Trigger a standard linear ADSR envelope. Halfway through the `ATTACK` phase, dynamically change the curve selection register `config.ctrl[6:5]` from Linear (`00`) to Exponential (`01`) mid-transition.
+* **Assertion**: Verify that the wave shaper accepts the new parameter instantly on the next clock cycle and interpolates smoothly from the current amplitude value using the new exponential ROM table, without causing output signal discontinuities, pops, or wrapping glitches.
 
 ---
 

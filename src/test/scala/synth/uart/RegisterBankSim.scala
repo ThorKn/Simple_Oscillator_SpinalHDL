@@ -34,6 +34,15 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.config.pwmWidth.toInt == 0, "pwmWidth must remain 0 during reset")
       assert(dut.io.config.volume.toInt == 0, "Volume must remain 0 during reset")
       
+      // Assert Envelope config fields remain strictly 0 under active reset
+      assert(dut.io.envConfig.ctrl.toInt == 0, "envConfig.ctrl must remain 0 during reset")
+      assert(dut.io.envConfig.attack.toInt == 0, "envConfig.attack must remain 0 during reset")
+      assert(dut.io.envConfig.decay.toInt == 0, "envConfig.decay must remain 0 during reset")
+      assert(dut.io.envConfig.sustain.toInt == 0, "envConfig.sustain must remain 0 during reset")
+      assert(dut.io.envConfig.release.toInt == 0, "envConfig.release must remain 0 during reset")
+      assert(dut.io.envConfig.syncCtrl.toInt == 0, "envConfig.syncCtrl must remain 0 during reset")
+      assert(dut.io.envConfig.phaseOffset.toInt == 0, "envConfig.phaseOffset must remain 0 during reset")
+      
       // Clear write signals and wait for reset deassertion and stabilization
       dut.io.regWrite.valid #= false
       dut.io.regWrite.payload.address #= 0
@@ -78,6 +87,76 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.config.freqWord.toLong == expectedFreq, s"Expected atomic update to $expectedFreq, got ${dut.io.config.freqWord.toLong}")
 
       println("Atomic Frequency Updates verified successfully.")
+
+      // 1.2.4 Verify Envelope Parameter Updates
+      println("Verifying Envelope Parameter Updates:")
+      writeReg(0x40, 0x15)
+      assert(dut.io.envConfig.ctrl.toInt == 0x15, s"Expected envConfig.ctrl to be 0x15, got 0x${dut.io.envConfig.ctrl.toInt.toHexString}")
+
+      writeReg(0x41, 0x0A)
+      assert(dut.io.envConfig.attack.toInt == 0x0A, s"Expected envConfig.attack to be 0x0A, got ${dut.io.envConfig.attack.toInt}")
+
+      writeReg(0x42, 0x1F)
+      assert(dut.io.envConfig.decay.toInt == 0x1F, s"Expected envConfig.decay to be 0x1F, got ${dut.io.envConfig.decay.toInt}")
+
+      writeReg(0x43, 0x80)
+      assert(dut.io.envConfig.sustain.toInt == 0x80, s"Expected envConfig.sustain to be 0x80, got ${dut.io.envConfig.sustain.toInt}")
+
+      writeReg(0x44, 0x2C)
+      assert(dut.io.envConfig.release.toInt == 0x2C, s"Expected envConfig.release to be 0x2C, got ${dut.io.envConfig.release.toInt}")
+
+      writeReg(0x45, 0x05)
+      assert(dut.io.envConfig.syncCtrl.toInt == 0x05, s"Expected envConfig.syncCtrl to be 0x05, got 0x${dut.io.envConfig.syncCtrl.toInt.toHexString}")
+
+      writeReg(0x46, 0xFF)
+      assert(dut.io.envConfig.phaseOffset.toInt == 0xFF, s"Expected envConfig.phaseOffset to be 0xFF, got ${dut.io.envConfig.phaseOffset.toInt}")
+
+      println("Envelope Parameter Updates verified successfully.")
+
+      // 1.2.5 Verify Address Crosstalk & Channel Isolation
+      println("Verifying Address Crosstalk & Channel Isolation:")
+      
+      // Step A: Capture current envelope values
+      val oldCtrl        = dut.io.envConfig.ctrl.toInt
+      val oldAttack      = dut.io.envConfig.attack.toInt
+      val oldDecay       = dut.io.envConfig.decay.toInt
+      val oldSustain     = dut.io.envConfig.sustain.toInt
+      val oldRelease     = dut.io.envConfig.release.toInt
+      val oldSyncCtrl    = dut.io.envConfig.syncCtrl.toInt
+      val oldPhaseOffset = dut.io.envConfig.phaseOffset.toInt
+
+      // Write to oscillator registers
+      writeReg(0x03, 1) // Change waveSelect to 1
+      writeReg(0x04, 0x50)
+      writeReg(0x05, 0x30)
+
+      // Verify envelope values are completely unaffected
+      assert(dut.io.envConfig.ctrl.toInt == oldCtrl, "Envelope ctrl must be isolated from osc writes")
+      assert(dut.io.envConfig.attack.toInt == oldAttack, "Envelope attack must be isolated from osc writes")
+      assert(dut.io.envConfig.decay.toInt == oldDecay, "Envelope decay must be isolated from osc writes")
+      assert(dut.io.envConfig.sustain.toInt == oldSustain, "Envelope sustain must be isolated from osc writes")
+      assert(dut.io.envConfig.release.toInt == oldRelease, "Envelope release must be isolated from osc writes")
+      assert(dut.io.envConfig.syncCtrl.toInt == oldSyncCtrl, "Envelope syncCtrl must be isolated from osc writes")
+      assert(dut.io.envConfig.phaseOffset.toInt == oldPhaseOffset, "Envelope phaseOffset must be isolated from osc writes")
+
+      // Step B: Capture current oscillator values
+      val oldFreq = dut.io.config.freqWord.toLong
+      val oldWave = dut.io.config.waveSelect.toInt
+      val oldPwm  = dut.io.config.pwmWidth.toInt
+      val oldVol  = dut.io.config.volume.toInt
+
+      // Write to envelope registers
+      writeReg(0x40, 0x00)
+      writeReg(0x41, 0x00)
+      writeReg(0x42, 0x00)
+      
+      // Verify oscillator values are completely unaffected
+      assert(dut.io.config.freqWord.toLong == oldFreq, "Oscillator frequency must be isolated from env writes")
+      assert(dut.io.config.waveSelect.toInt == oldWave, "Oscillator waveSelect must be isolated from env writes")
+      assert(dut.io.config.pwmWidth.toInt == oldPwm, "Oscillator pwmWidth must be isolated from env writes")
+      assert(dut.io.config.volume.toInt == oldVol, "Oscillator volume must be isolated from env writes")
+
+      println("Address Crosstalk & Channel Isolation verified successfully.")
     }
   }
 }

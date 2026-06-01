@@ -2,13 +2,14 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.{RegisterWrite, OscillatorConfig}
+import synth.common.{RegisterWrite, OscillatorConfig, EnvelopeConfig}
 
 class RegisterBank extends Component {
 
   val io = new Bundle {
     val regWrite = slave(Flow(RegisterWrite()))
     val config   = out(OscillatorConfig())
+    val envConfig = out(EnvelopeConfig())
   }
 
   // --------------------------------------------------------------------------
@@ -26,6 +27,15 @@ class RegisterBank extends Component {
   val waveformReg     = Reg(Bits(8 bits)) init(0)
   val pulseWidthReg   = Reg(Bits(8 bits)) init(0)
   val volumeReg       = Reg(Bits(8 bits)) init(0)
+
+  // Envelope registers
+  val envCtrlReg        = Reg(Bits(8 bits)) init(0)
+  val envAttackReg      = Reg(Bits(8 bits)) init(0)
+  val envDecayReg       = Reg(Bits(8 bits)) init(0)
+  val envSustainReg     = Reg(Bits(8 bits)) init(0)
+  val envReleaseReg     = Reg(Bits(8 bits)) init(0)
+  val envSyncCtrlReg    = Reg(Bits(8 bits)) init(0)
+  val envPhaseOffsetReg = Reg(Bits(8 bits)) init(0)
 
   // --------------------------------------------------------------------------
   // Register Write Logic
@@ -66,6 +76,41 @@ class RegisterBank extends Component {
       is(U"8'x05") {
         volumeReg := io.regWrite.payload.data
       }
+
+      // Envelope Control (ENV_CTRL)
+      is(U"8'x40") {
+        envCtrlReg := io.regWrite.payload.data
+      }
+
+      // Envelope Attack (ENV_ATTACK)
+      is(U"8'x41") {
+        envAttackReg := io.regWrite.payload.data
+      }
+
+      // Envelope Decay (ENV_DECAY)
+      is(U"8'x42") {
+        envDecayReg := io.regWrite.payload.data
+      }
+
+      // Envelope Sustain (ENV_SUSTAIN)
+      is(U"8'x43") {
+        envSustainReg := io.regWrite.payload.data
+      }
+
+      // Envelope Release (ENV_RELEASE)
+      is(U"8'x44") {
+        envReleaseReg := io.regWrite.payload.data
+      }
+
+      // Envelope Sync Control (ENV_SYNC_CTRL)
+      is(U"8'x45") {
+        envSyncCtrlReg := io.regWrite.payload.data
+      }
+
+      // Envelope Phase Offset (ENV_PHASE_OFFSET)
+      is(U"8'x46") {
+        envPhaseOffsetReg := io.regWrite.payload.data
+      }
     }
   }
 
@@ -92,6 +137,15 @@ class RegisterBank extends Component {
   val oscVolumeReg =
     RegNext(volumeReg.asUInt) init(0)
 
+  // Synced envelope registers
+  val syncedEnvCtrl        = RegNext(envCtrlReg) init(0)
+  val syncedEnvAttack      = RegNext(envAttackReg.asUInt) init(0)
+  val syncedEnvDecay       = RegNext(envDecayReg.asUInt) init(0)
+  val syncedEnvSustain     = RegNext(envSustainReg.asUInt) init(0)
+  val syncedEnvRelease     = RegNext(envReleaseReg.asUInt) init(0)
+  val syncedEnvSyncCtrl    = RegNext(envSyncCtrlReg) init(0)
+  val syncedEnvPhaseOffset = RegNext(envPhaseOffsetReg.asUInt) init(0)
+
   // --------------------------------------------------------------------------
   // Outputs
   // --------------------------------------------------------------------------
@@ -100,4 +154,12 @@ class RegisterBank extends Component {
   io.config.waveSelect := oscWaveformReg(2 downto 0)
   io.config.pwmWidth   := oscPulseWidthReg
   io.config.volume     := oscVolumeReg
+
+  io.envConfig.ctrl        := syncedEnvCtrl
+  io.envConfig.attack      := syncedEnvAttack
+  io.envConfig.decay       := syncedEnvDecay
+  io.envConfig.sustain     := syncedEnvSustain
+  io.envConfig.release     := syncedEnvRelease
+  io.envConfig.syncCtrl    := syncedEnvSyncCtrl
+  io.envConfig.phaseOffset := syncedEnvPhaseOffset
 }

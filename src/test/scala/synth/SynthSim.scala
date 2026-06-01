@@ -126,7 +126,9 @@ class SynthSim extends AnyFunSuite {
         if (l != 0) {
           nonZeroSamples += 1
           // Since it is configured to a 50% duty cycle PWM square wave, samples should reach peaks
-          assert(l == 32639 || l == -32640, s"Unexpected sample value: $l. Expected PWM peak 32639 or -32640.")
+          // With dual cascaded attenuators (10-bit bypassed at 1023, 8-bit master volume at 255):
+          // peak = 32767 * (1023/1024) * (255/256) = 32607, and negative peak rounds to -32609 due to signed shift rounding
+          assert(l == 32607 || l == -32609, s"Unexpected sample value: $l. Expected PWM peak 32607 or -32609.")
         }
       }
       

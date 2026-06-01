@@ -2,12 +2,13 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.OscillatorConfig
+import synth.common.{OscillatorConfig, EnvelopeConfig}
 
 class Uart extends Component {
   val io = new Bundle {
-    val rx     = in Bool()
-    val config = out(OscillatorConfig())
+    val rx        = in Bool()
+    val config    = out(OscillatorConfig())
+    val envConfig = out(EnvelopeConfig())
   }
 
   // Instantiate the internal submodules
@@ -20,4 +21,5 @@ class Uart extends Component {
   protocolDecoder.io.rxByte  << rxModule.io.byteOut
   registerBank.io.regWrite   << protocolDecoder.io.regWrite
   io.config                  := registerBank.io.config
+  io.envConfig               := registerBank.io.envConfig
 }
