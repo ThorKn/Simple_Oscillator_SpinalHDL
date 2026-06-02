@@ -1,3 +1,8 @@
+h0 {
+    font-size: 24px;
+    line-height: 150%;
+}
+
 h1 {
     font-size: 20px;
     line-height: 150%;
@@ -32,4 +37,59 @@ th,
 td {
     font-size: 12px;
     line-height: 150%;
+}
+
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+li,
+td,
+th,
+blockquote,
+a,
+strong,
+em {
+    color: #000000 !important;
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* Code blocks */
+pre,
+code {
+    color: #000000 !important;
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* Syntax highlighting tokens */
+.token,
+.hljs,
+.hljs * {
+    color: #000000 !important;
+}
+
+/* Links */
+a {
+    text-decoration: underline;
+    color: #000000 !important;
+}
+
+/* Avoid breaking code blocks across pages */
+pre {
+    page-break-inside: avoid;
+}
+
+/* Avoid breaking tables across pages */
+table {
+    page-break-inside: avoid;
+}
+
+.page-break {
+    page-break-before: always;
 }

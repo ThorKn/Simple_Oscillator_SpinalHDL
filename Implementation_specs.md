@@ -1,9 +1,9 @@
-# spinalSynth: Implementation Specification
+# **spinalSynth**: Implementation Specification
 
 ## Table of Contents
 
-1. spinalHDL Hierarchy
-2. Synth (System Top) Module
+1. Repository structure
+2. Synth Module (Toplevel)
 3. TimingGenerator
 4. Uart & Registers
    - 4.1 UartRx
@@ -23,7 +23,11 @@
 9. I2STransmitter
    - 9.1 Gated Startup and Idle State
 
-## 1. spinalHDL Hierarchy
+<div class="page-break"></div>
+
+---
+
+# 1. Repository structure
 
 The spinalHDL implementation shall use the following hierarchy for folders, subfolders and files.
 
@@ -63,6 +67,9 @@ spinalSynth/
 │   │           ├── output/                 # Audio output pipeline
 │   │           │   ├── Decimator.scala     # 10x downsampling (per Section 5)
 │   │           │   └── I2STransmitter.scala # I2S protocol engine (per Section 6)
+```
+
+```text
 │   └── test/
 │       └── scala/
 │           └── synth/          # SpinalSim testbenches
@@ -89,9 +96,9 @@ spinalSynth/
 └── Implementation_specs.md     # Technical specification (Context File)
 ```
 
-## 2. Synth (System Top) Module
+---
 
-#### Purpose
+# 2. Synth Module (Toplevel)
 
 The Synth module is the hardware entry point and system integration entity.
 
@@ -110,13 +117,13 @@ The module shall:
 - **Register Pipeline Latency Alignment**: The cascade of two series registered attenuators introduces exactly **2 clock cycles** of registered pipeline latency between the oscillator and the decimator. The clock-enable decimated `sampleTick` is delayed by exactly 2 cycles (`Delay(timingGen.io.sampleTick, cycleCount = 2)`) to keep the Decimator perfectly aligned with the audio data stream.
 - **Subsystem Isolation**: Keep Synth strictly as an abstraction/integration layer containing no DSP math details or physical protocol implementation details.
 
-#### Clocking and Reset
+### Clocking and Reset
 
 The system operates within a single clock domain managed at the top level:
 - **Clock**: 24 MHz external input.
 - **Reset**: Asynchronous, Active-High.
 
-#### IO Bundle
+### IO Bundle
 
 ```
 val io = new Bundle {
@@ -131,9 +138,11 @@ val io = new Bundle {
 }
 ```
 
-## 3. TimingGenerator
+---
 
-#### IO Bundle
+# 3. TimingGenerator
+
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -143,7 +152,7 @@ val io = new Bundle {
 }
 ```
 
-#### Internal Structure
+### Internal Structure
 
 | Signal          | Width | Purpose            |
 | --------------- | ----- | ------------------ |
@@ -156,7 +165,7 @@ Both counters:
 - run independently
 - are free-running
 
-#### Tick Behaviour
+### Tick Behaviour
 
 Both tick outputs:
 
@@ -165,11 +174,13 @@ Both tick outputs:
 - one clock cycle wide
 - default to `False`
 
-## 4. Uart Subsystem
+---
 
-This subsystem encapsulates serial data decoding, command protocol framing, and parameter register storage into a single cohesive module.
+# 4. Uart & Registers
 
-#### Submodule Structure
+The UART package encapsulates serial data decoding, command protocol framing, and parameter register storage.
+
+### Package Structure
 
 ```text
 Uart
@@ -178,7 +189,7 @@ Uart
  └── RegisterBank
 ```
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -188,11 +199,11 @@ val io = new Bundle {
 }
 ```
 
-### 4.1 UartRx
+## 4.1 UartRx
 
 **Purpose:** Converts the serial UART bitstream into parallel 8-bit bytes. It operates at 115,200 baud using a 208-tick bit period and includes start-bit verification.
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -201,11 +212,11 @@ val io = new Bundle {
 }
 ```
 
-### 4.2 UartProtocolDecoder
+## 4.2 UartProtocolDecoder
 
 **Purpose:** Frames individual bytes into 3-byte command packets: `[Address/Command]`, `[Data]`, and `[Reserved]`. It asserts `writeEnable` only when a full frame is valid.
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -214,17 +225,17 @@ val io = new Bundle {
 }
 ```
 
-### 4.3 RegisterBank
+## 4.3 RegisterBank
 
 **Purpose:** Stores the current state of the synthesizer parameters. It implements an atomic update for the 24-bit frequency word, ensuring all three bytes are applied simultaneously to the DDS engine upon writing to the high-byte address.
 
-#### Atomic Write Staging Mechanism
+### Atomic Write Staging Mechanism
 To prevent audibly jarring sweep glitches or frequency artifacts, the multi-byte frequency configuration transitions atomically:
 - **`FREQ_LOW` (`0x00`)**: Staged into a temporary staging register `freqLowShadow`.
 - **`FREQ_MID` (`0x01`)**: Staged into a temporary staging register `freqMidShadow`.
 - **`FREQ_HIGH` (`0x02`)**: Directly commits the newly written high byte (`freqHighReg`) and transfers both staged shadow registers (`freqMidReg := freqMidShadow`, `freqLowReg := freqLowShadow`) to the active registers simultaneously on a single clock edge.
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -234,33 +245,13 @@ val io = new Bundle {
 }
 ```
 
-## 5. Oscillator
+---
 
-The Oscillator is a module that connects the four submodules, as shown in the following internal submodule structure. It serves as an abstraction layer above the generation of the oscillating audio signals.
+# 5. Oscillator
 
-#### Purpose
+The Oscillator package connects the four submodules, as shown in the following package structure. It serves as an abstraction layer above the generation of the oscillating audio signals.
 
-Core DDS synthesis engine.
-
-Responsibilities:
-
-- phase accumulation
-- waveform generation
-- noise generation
-- mux between waveforms and noise
-- oversampled sample generation
-
-#### IO Bundle
-
-```scala
-val io = new Bundle {
-    val phaseTick = in Bool()
-    val config    = in(OscillatorConfig())
-    val sample    = master(Flow(SInt(16 bits)))
-}
-```
-
-#### Internal structure of submodules:
+### Package Structure
 
 ```text
 Oscillator
@@ -270,9 +261,32 @@ Oscillator
  └── Mux
 ```
 
-### 5.1 Oscillator Submodules
+### Purpose
 
-#### Accumulator
+Core waveform synthesis engine.
+
+Responsibilities:
+
+- phase accumulation
+- waveform generation
+- noise generation
+- mux between waveforms and noise
+- oversampled sample generation
+
+### IO Bundle
+
+```scala
+val io = new Bundle {
+    val phaseTick = in Bool()
+    val config    = in(OscillatorConfig())
+    val sample    = master(Flow(SInt(16 bits)))
+}
+```
+
+
+## 5.1 Oscillator Submodules
+
+### Accumulator
 
 Responsible for:
 
@@ -288,7 +302,7 @@ val io = new Bundle {
 }
 ```
 
-#### Noise
+### Noise
 
 Responsible for:
 
@@ -304,7 +318,7 @@ val io = new Bundle {
 }
 ```
 
-#### Generators
+### Generators
 
 Responsible for:
 
@@ -323,7 +337,7 @@ val io = new Bundle {
 
 The module shall contain only combinational logic.
 
-#### Mux
+### Mux
 
 Responsible for:
 
@@ -339,7 +353,7 @@ val io = new Bundle {
 }
 ```
 
-### 5.2 Oscillator signal flow
+## 5.2 Oscillator signal flow
 
 ```text
 Accumulator ── phase ──┐
@@ -359,14 +373,16 @@ Noise ── noiseSample ───┘
                      sample
 ```
 
-## 6. Envelope Generator
+---
 
-### 6.1 EnvelopeGenerator (Top-Level Wrapper)
+# 6. Envelope Generator
 
-#### Purpose
+## 6.1 EnvelopeGenerator (Top-Level Wrapper)
+
+### Purpose
 The `EnvelopeGenerator` top-level wrapper acts as the coordinator. It encapsulates the three core submodules (`EnvelopeCtrl`, `EnvelopeAccumulator`, and `EnvelopeShaper`), binds them together, registers parameters to the global register map, and packages the outputs into a synced flow rate.
 
-#### IO Bundle
+### IO Bundle
 ```scala
 class EnvelopeGenerator extends Component {
   val io = new Bundle {
@@ -383,7 +399,7 @@ class EnvelopeGenerator extends Component {
 }
 ```
 
-#### Internal Architecture
+### Internal Architecture
 The wrapper instantiates the submodules and wires their control signals. The outputs from the `EnvelopeShaper` are driven directly to the system audio/control busses.
 
 ```scala
@@ -414,12 +430,12 @@ io.envelopeOut       <> shaper.io.envelopeOut
 io.envelopeOutSigned <> shaper.io.envelopeOutSigned
 ```
 
-### 6.2 EnvelopeCtrl
+## 6.2 EnvelopeCtrl
 
-#### Purpose
+### Purpose
 The `EnvelopeCtrl` submodule serves as the "brain". It is responsible for parsing control registers, driving the ADSR playback state machine, computing direction and synchronization triggers, and fetching stage-appropriate increment values from a static lookup table.
 
-#### IO Bundle
+### IO Bundle
 ```scala
 class EnvelopeCtrl extends Component {
   val io = new Bundle {
@@ -442,7 +458,7 @@ class EnvelopeCtrl extends Component {
 }
 ```
 
-#### State Machine Design
+### State Machine Design
 The ADSR engine is implemented as a built-in SpinalHDL `StateMachine` (`spinal.lib.fsm`). 
 
 ```text
@@ -473,7 +489,7 @@ It controls the envelope stages using five main states:
 * **SUSTAIN (Stage 3):** The accumulator is paused, naturally holding the output at the configured sustain level. A `Gate OFF` trigger resets the accumulator and transitions the FSM to `RELEASE`.
 * **RELEASE (Stage 4):** The phase accumulator counts reverse (downwards). If `Gate ON` is triggered, it resets the accumulator and transitions to `ATTACK`. When the segment underflows to `0`, it transitions back to `IDLE`.
 
-#### Playback & Sync Controller
+### Playback & Sync Controller
 * **Looping (LFO Mode):** When `config.ctrl[2]` (Loop Enable) is active, transitioning out of `DECAY` loops instantly back to `ATTACK` instead of going to `SUSTAIN`.
 * **Reverse Mode (Reserved Placeholder):** Config register `config.ctrl[4]` is reserved for future expansion; bypassed in current active RTL.
 * **Ping-Pong Mode (Reserved Placeholder):** Config register `config.ctrl[3]` is reserved for future expansion; bypassed in current active RTL.
@@ -481,10 +497,10 @@ It controls the envelope stages using five main states:
   * **Hard Sync:** A rising edge on `syncIn` forces the FSM back to `ATTACK` and sets `resetAccum := True`.
   * **MIDI Sync (Reserved Placeholder):** Port `midiClock` is a placeholder for future tempo-synced clock divisions.
 
-#### Logarithmic Time-to-Increment Lookup Table (ROM)
+### Logarithmic Time-to-Increment Lookup Table (ROM)
 Calculating the logarithmic time-duration mapping at runtime requires expensive divisor blocks. To ensure ASIC portability, the 256 increment coefficients are computed in Scala at compile-time and instantiated as a static hardware ROM (`Mem` in SpinalHDL).
 
-##### Scala ROM Calculator Formula:
+#### Scala ROM Calculator Formula:
 ```scala
 val clockFreq = 24000000.0   // 24 MHz
 val tMin      = 0.0005       // 0.5 ms
@@ -499,12 +515,12 @@ val lutContent = for (p <- 0 until 256) yield {
 val rom = Mem(UInt(22 bits), 256) init(lutContent)
 ```
 
-### 6.3 EnvelopeAccumulator
+## 6.3 EnvelopeAccumulator
 
-#### Purpose
+### Purpose
 The `EnvelopeAccumulator` is a high-speed 32-bit digital register that acts as the phase counter. It increments (or decrements) on every 24 MHz system clock cycle when enabled, driving the envelope's progress through time.
 
-#### IO Bundle
+### IO Bundle
 ```scala
 class EnvelopeAccumulator extends Component {
   val io = new Bundle {
@@ -524,7 +540,7 @@ class EnvelopeAccumulator extends Component {
 }
 ```
 
-#### Counter & Overflow Behavior
+### Counter & Overflow Behavior
 * **Accumulator register:** `val accum = Reg(UInt(32 bits)) init(0)`
 * **Accumulation Logic:**
   * If `io.resetAccum` is asserted, reset `accum := 0`.
@@ -540,12 +556,12 @@ class EnvelopeAccumulator extends Component {
   * In **Release (Stage 4)**, completion is hit when the accum register underflows (`baseIndex` reaching `0`).
   * `segmentDone := isAttackDone || isDecayDone || isReleaseDone`
 
-### 6.4 EnvelopeShaper
+## 6.4 EnvelopeShaper
 
-#### Purpose
+### Purpose
 The `EnvelopeShaper` transforms the raw, linear accumulator output into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
 
-#### IO Bundle
+### IO Bundle
 ```scala
 class EnvelopeShaper extends Component {
   val io = new Bundle {
@@ -564,7 +580,7 @@ class EnvelopeShaper extends Component {
 }
 ```
 
-#### ROM Curves
+### ROM Curves
 The shaper houses four distinct compile-time calculated ROMs, each with **257 entries** to safely compute lookup boundary intervals `LUT[x+1]` when `x = 255` without dynamic wrapping checks.
 
 * **Linear ROM:** `LUT[x] = x * (255.0 / 255.0)` (0 to 255)
@@ -579,7 +595,7 @@ val logRom = Mem(UInt(8 bits), 257) init(logContent)
 val sigRom = Mem(UInt(8 bits), 257) init(sigContent)
 ```
 
-#### Multiplierless Hybrid 8+2 Linear Interpolation
+### Multiplierless Hybrid 8+2 Linear Interpolation
 Linear interpolation requires the formula: `Y = Y0 + (f / 4) * (Y1 - Y0)`.
 To prevent expensive synthesis of physical multipliers on custom silicon, the fraction multiplication `(f/4) * delta_Y` is resolved in combinational shift-add structures.
 
@@ -621,7 +637,7 @@ switch(fractionAdjusted) {
 val finalValUnipolar = interp.asUInt.resize(10 bits)
 ```
 
-##### Parallel Bipolar Output Flow:
+#### Parallel Bipolar Output Flow:
 * **Unipolar Flow:** `io.envelopeOut.payload := finalValUnipolar`
 * **Bipolar Flow:** Bypasses arithmetic blocks by shifting the unipolar range (0 to 1023) to signed (-512 to +511) through direct inversion of the unipolar MSB:
   ```scala
@@ -633,7 +649,7 @@ val finalValUnipolar = interp.asUInt.resize(10 bits)
   io.envelopeOutSigned.valid := io.phaseTick
   ```
 
-### 6.5 Signal Flow & Pipeline Timing
+## 6.5 Signal Flow & Pipeline Timing
 
 To ensure hardware timing closure at 24 MHz and robust, glitch-free control transitions, the Envelope Generator architecture isolates data lookup, mathematical computation, and control registers into dedicated synchronous pipeline stages.
 
@@ -660,7 +676,7 @@ The design implements two distinct hardware signal chains:
                +-------------------------------------------------+
 ```
 
-#### 6.5.1 Chain 1: Control Input Propagation (`syncIn`, `Gate` -> Accumulator)
+### 6.5.1 Chain 1: Control Input Propagation (`syncIn`, `Gate` -> Accumulator)
 This path synchronizes asynchronous external controls and propagates internal register signals to steer the accumulator:
 * **External Sync Input (`syncIn`):** Connects to a standard 2-stage flip-flop synchronizer clocked at 24 MHz to prevent metastability.
   * *Latency:* **2 clock cycles** (synchronization penalty).
@@ -668,7 +684,7 @@ This path synchronizes asynchronous external controls and propagates internal re
 * **State Updates:** The FSM processes inputs combinationally and issues `resetAccum` or `runAccum` control registers to the accumulator on the next cycle.
   * *Total Control Latency:* **3 clock cycles** for `syncIn`, **1 clock cycle** for register-driven gate triggers.
 
-#### 6.5.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
+### 6.5.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
 This is the core mathematical flow designed to maintain a 24 MHz clock cycle bound through registered cells:
 * **T0 (Accumulation Stage):** The 32-bit register `accum` increments (or decrements) by `phaseInc`. The split base index and fraction bits are output stable.
 * **T1 (ROM Lookup Stage):** The 8-bit index addresses the dual boundary ports `LUT[x]` and `LUT[x+1]`. The memory array lookup requires **1 clock cycle** to fetch and settle output registers.
@@ -678,16 +694,16 @@ This is the core mathematical flow designed to maintain a 24 MHz clock cycle bou
 
 ---
 
-## 7. Attenuator
+# 7. Attenuator
 
-#### Purpose
+### Purpose
 Applies volume scaling and attenuation dynamically on the oversampled 480 kHz audio sample stream.
 
-#### Parameterization
+### Parameterization
 The module is parameterized at compile-time to support dynamic input volume register sizes:
 * **`volumeWidth`** (`Int`, default = `8`): Defines the bit-width of the volume control input.
 
-#### IO Bundle
+### IO Bundle
 ```scala
 class Attenuator(volumeWidth: Int = 8) extends Component {
   val io = new Bundle {
@@ -698,7 +714,7 @@ class Attenuator(volumeWidth: Int = 8) extends Component {
 }
 ```
 
-#### Mathematical Scaling
+### Mathematical Scaling
 To prevent sign-bit alignment errors during dynamic multiplication:
 1. Zero-extend `io.volume` to a signed integer (`volumeSigned = io.volume.intoSInt`) of size `volumeWidth + 1` bits.
 2. Perform signed multiplication between the 16-bit signed input sample and `volumeSigned` to produce a product of size `16 + volumeWidth + 1` bits.
@@ -708,9 +724,9 @@ To prevent sign-bit alignment errors during dynamic multiplication:
 
 ---
 
-## 8. Decimator
+# 8. Decimator
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -732,9 +748,9 @@ valid communicates that a new 48 kHz sample is available now.
 
 ---
 
-## 9. I2STransmitter
+# 9. I2STransmitter
 
-#### IO Bundle
+### IO Bundle
 
 ```scala
 val io = new Bundle {
@@ -765,7 +781,7 @@ The serializer uses the scheduled timing subpattern:
 
 to generate the required average I²S bit timing.
 
-### 9.1 Gated Startup and Idle State
+## 9.1 Gated Startup and Idle State
 
 The transmitter employs a gated startup mechanism to ensure that 
 the I2S clock and data lines only toggle when valid audio data is present.

@@ -1,13 +1,4 @@
-# spinalSynth
-
----
-
-Additional documents for spinalSynth:
-
-* [Implementation_specs.md](Implementation_specs.md)  
-* [Testing_specs.md](Testing_specs.md)  
-
----
+# **spinalSynth**
 
 ## Table of Contents
 
@@ -26,6 +17,13 @@ Additional documents for spinalSynth:
 13. I²S Output Interface
 14. Numeric Formats
 15. Confirmed System Parameters
+
+## Additional documents for spinalSynth:
+
+* [Implementation_specs.md](Implementation_specs.md)  
+* [Testing_specs.md](Testing_specs.md) 
+
+<div class="page-break"></div>
 
 ---
 
@@ -62,6 +60,8 @@ The project was developed with the heavy usage of AI tools. All the specificatio
 
 Impementation, debugging and testing was done in VSCode with the free Gemini Extension.
 Later on, i switched the IDE to Antigravity and started paying for Gemini Access (Gemini Pro, Gemini Flash 3.5)
+
+<div class="page-break"></div>
 
 ---
 
@@ -106,6 +106,7 @@ External Interface (24MHz Clk, Reset, UART Rx)
        Stereo Digital Audio
 ```
 
+<div class="page-break"></div>
 
 ---
 
@@ -314,6 +315,8 @@ The minimum frequency step is:
 ```text
 480000 / 16777216 ≈ 0.0286 Hz
 ```
+
+---
 
 # 8. Waveform Generators
 
@@ -907,13 +910,9 @@ The design shall use fixed-point arithmetic throughout.
 | **OscillatorConfig** | `freqWord` <br> `waveSelect` <br> `pwmWidth` <br> `volume` | UInt(24 bits) <br> UInt(3 bits) <br> UInt(8 bits) <br> UInt(8 bits) |
 | **Waveforms** | `saw` <br> `square` <br> `pwm` <br> `tri` | SInt(16 bits) <br> SInt(16 bits) <br> SInt(16 bits) <br> SInt(16 bits) |
 
-```
-
 ---
 
 # 15. Confirmed System Parameters
-
----
 
 | Parameter | Value |
 |---|---|
