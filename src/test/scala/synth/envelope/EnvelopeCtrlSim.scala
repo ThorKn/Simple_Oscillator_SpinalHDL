@@ -15,14 +15,12 @@ class EnvelopeCtrlSim extends AnyFunSuite {
 
       // Initialize inputs to safe defaults
       dut.io.syncIn #= false
-      dut.io.midiClock #= false
       dut.io.config.ctrl #= 0
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
       dut.io.config.sustain #= 0
       dut.io.config.release #= 0
-      dut.io.config.syncCtrl #= 0
-      dut.io.config.phaseOffset #= 0
+      dut.io.config.gate #= 0
       dut.io.segmentDone #= false
 
       // Wait 1 clock cycle to stabilize signals under active reset
@@ -47,8 +45,8 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       // ---------------------------------------------------------------------
       println("Verifying Normal ADSR State Transitions:")
       
-      // Step 1: Trigger Gate ON (config.ctrl[1] is Gate bit -> value = 2)
-      dut.io.config.ctrl #= 2
+      // Step 1: Trigger Gate ON (config.gate[0] is Gate bit -> value = 1)
+      dut.io.config.gate #= 1
       dut.clockDomain.waitSampling(2)
       
       // IDLE -> ATTACK (activeStage = 1)
@@ -78,7 +76,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       assert(!dut.io.runAccum.toBoolean, "Accumulator must pause during SUSTAIN stage")
 
       // Step 4: Toggle Gate OFF (value = 0)
-      dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       dut.clockDomain.waitSampling(2)
 
       // SUSTAIN -> RELEASE (activeStage = 4)
@@ -104,21 +102,21 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       println("Verifying Gate Interruption and Re-triggering Dynamics:")
       
       // Case A: ATTACK -> Gate OFF -> RELEASE
-      dut.io.config.ctrl #= 2 // Gate ON
+      dut.io.config.gate #= 1 // Gate ON
       dut.clockDomain.waitSampling(2)
       assert(dut.io.activeStage.toInt == 1, "Should be in ATTACK")
       
-      dut.io.config.ctrl #= 0 // Gate OFF mid-flight
+      dut.io.config.gate #= 0 // Gate OFF mid-flight
       dut.clockDomain.waitSampling(2)
       assert(dut.io.activeStage.toInt == 4, s"Expected direct transition to RELEASE (4) on Gate OFF, got ${dut.io.activeStage.toInt}")
 
       // Case B: RELEASE -> Gate ON -> ATTACK
-      dut.io.config.ctrl #= 2 // Gate ON mid-release
+      dut.io.config.gate #= 1 // Gate ON mid-release
       dut.clockDomain.waitSampling(2)
       assert(dut.io.activeStage.toInt == 1, s"Expected immediate re-trigger to ATTACK (1) from RELEASE, got ${dut.io.activeStage.toInt}")
       
       // Clear back to IDLE
-      dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       dut.clockDomain.waitSampling(2)
       dut.io.segmentDone #= true
       dut.clockDomain.waitSampling()
@@ -133,8 +131,9 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       // ---------------------------------------------------------------------
       println("Verifying LFO Looping Playback:")
       
-      // Set Loop Enable (ctrl[2] = 4) + Gate ON (ctrl[1] = 2) -> value = 6
-      dut.io.config.ctrl #= 6
+      // Set Loop Enable (ctrl[2] = 4) and Gate ON (gate[0] = 1)
+      dut.io.config.ctrl #= 4
+      dut.io.config.gate #= 1
       dut.clockDomain.waitSampling(2)
       assert(dut.io.activeStage.toInt == 1, "Expected FSM in ATTACK")
 
@@ -154,6 +153,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       
       // Clear control registers and idle FSM
       dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       dut.clockDomain.waitSampling(2)
       println("LFO Looping Playback verified successfully.")
 
@@ -163,7 +163,7 @@ class EnvelopeCtrlSim extends AnyFunSuite {
       println("Verifying Logarithmic Rate Coefficient ROM Mapping:")
       
       // Force FSM into ATTACK state to map attack ROM values
-      dut.io.config.ctrl #= 2
+      dut.io.config.gate #= 1
       dut.clockDomain.waitSampling(2)
       
       // Check minimum speed mapping (Attack = 0 -> T_min = 0.5 ms)

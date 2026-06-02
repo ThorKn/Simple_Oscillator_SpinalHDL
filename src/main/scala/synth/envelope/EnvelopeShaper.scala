@@ -10,7 +10,6 @@ class EnvelopeShaper extends Component {
     val baseIndex    = in UInt(8 bits)        // Upper 8 integer bits from accumulator
     val fraction     = in UInt(2 bits)        // Lower 2 fractional bits from accumulator
     val curveSelect  = in UInt(2 bits)        // 00=Lin, 01=Exp, 10=Log, 11=S-Curve
-    val sustainLevel = in UInt(8 bits)        // Target sustain level (0 to 255)
     val activeStage  = in UInt(3 bits)        // Active FSM stage indicator (IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4)
     val accumDir     = in Bool()              // Direction of accumulator (0 = Forward, 1 = Reverse)
     val envelopeOut       = master(Flow(UInt(10 bits))) // 10-bit unipolar flow (0 to 1023)

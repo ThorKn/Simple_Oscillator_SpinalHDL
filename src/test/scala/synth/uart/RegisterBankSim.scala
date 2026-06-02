@@ -40,8 +40,7 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.envConfig.decay.toInt == 0, "envConfig.decay must remain 0 during reset")
       assert(dut.io.envConfig.sustain.toInt == 0, "envConfig.sustain must remain 0 during reset")
       assert(dut.io.envConfig.release.toInt == 0, "envConfig.release must remain 0 during reset")
-      assert(dut.io.envConfig.syncCtrl.toInt == 0, "envConfig.syncCtrl must remain 0 during reset")
-      assert(dut.io.envConfig.phaseOffset.toInt == 0, "envConfig.phaseOffset must remain 0 during reset")
+      assert(dut.io.envConfig.gate.toInt == 0, "envConfig.gate must remain 0 during reset")
       
       // Clear write signals and wait for reset deassertion and stabilization
       dut.io.regWrite.valid #= false
@@ -106,10 +105,7 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.envConfig.release.toInt == 0x2C, s"Expected envConfig.release to be 0x2C, got ${dut.io.envConfig.release.toInt}")
 
       writeReg(0x45, 0x05)
-      assert(dut.io.envConfig.syncCtrl.toInt == 0x05, s"Expected envConfig.syncCtrl to be 0x05, got 0x${dut.io.envConfig.syncCtrl.toInt.toHexString}")
-
-      writeReg(0x46, 0xFF)
-      assert(dut.io.envConfig.phaseOffset.toInt == 0xFF, s"Expected envConfig.phaseOffset to be 0xFF, got ${dut.io.envConfig.phaseOffset.toInt}")
+      assert(dut.io.envConfig.gate.toInt == 0x05, s"Expected envConfig.gate to be 0x05, got 0x${dut.io.envConfig.gate.toInt.toHexString}")
 
       println("Envelope Parameter Updates verified successfully.")
 
@@ -122,8 +118,7 @@ class RegisterBankSim extends AnyFunSuite {
       val oldDecay       = dut.io.envConfig.decay.toInt
       val oldSustain     = dut.io.envConfig.sustain.toInt
       val oldRelease     = dut.io.envConfig.release.toInt
-      val oldSyncCtrl    = dut.io.envConfig.syncCtrl.toInt
-      val oldPhaseOffset = dut.io.envConfig.phaseOffset.toInt
+      val oldGate        = dut.io.envConfig.gate.toInt
 
       // Write to oscillator registers
       writeReg(0x03, 1) // Change waveSelect to 1
@@ -136,8 +131,7 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.envConfig.decay.toInt == oldDecay, "Envelope decay must be isolated from osc writes")
       assert(dut.io.envConfig.sustain.toInt == oldSustain, "Envelope sustain must be isolated from osc writes")
       assert(dut.io.envConfig.release.toInt == oldRelease, "Envelope release must be isolated from osc writes")
-      assert(dut.io.envConfig.syncCtrl.toInt == oldSyncCtrl, "Envelope syncCtrl must be isolated from osc writes")
-      assert(dut.io.envConfig.phaseOffset.toInt == oldPhaseOffset, "Envelope phaseOffset must be isolated from osc writes")
+      assert(dut.io.envConfig.gate.toInt == oldGate, "Envelope gate must be isolated from osc writes")
 
       // Step B: Capture current oscillator values
       val oldFreq = dut.io.config.freqWord.toLong

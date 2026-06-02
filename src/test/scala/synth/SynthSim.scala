@@ -65,8 +65,10 @@ class SynthSim extends AnyFunSuite {
       writeRegister(0x05, 0xFF)
 
       // Configure Envelope Parameters:
-      // Enable envelope (bit 0 = 1) + Gate ON (bit 1 = 2) -> value = 3 (address 0x40)
-      writeRegister(0x40, 0x03)
+      // Enable envelope (bit 0 = 1) -> value = 1 (address 0x40)
+      writeRegister(0x40, 0x01)
+      // Gate ON (bit 0 = 1) -> value = 1 (address 0x45)
+      writeRegister(0x45, 0x01)
       // Attack = 0 (fastest 0.5 ms rise) (address 0x41)
       writeRegister(0x41, 0x00)
       // Decay = 0 (address 0x42)

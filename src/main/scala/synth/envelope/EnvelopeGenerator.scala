@@ -6,13 +6,10 @@ import synth.common.EnvelopeConfig
 
 class EnvelopeGenerator extends Component {
   val io = new Bundle {
-    // Clock Heartbeat & Sync inputs
-    val phaseTick = in Bool()                 // Heartbeat tick synced with 480 kHz audio rate
-    val syncIn    = in Bool()                 // External trigger for Hard or Soft Sync
-    val midiClock = in Bool()                 // External MIDI clock tick (24 PPQN pulse)
+    val phaseTick = in Bool()                 // 480 kHz audio rate tick
+    val syncIn    = in Bool()                 // Trigger for Hard Sync
     val config    = in(EnvelopeConfig())      // Packaged register configurations
 
-    // System Outputs
     val envelopeOut       = master(Flow(UInt(10 bits))) // Unipolar output (0 to 1023)
     val envelopeOutSigned = master(Flow(SInt(10 bits))) // Bipolar output (-512 to +511)
   }
@@ -36,13 +33,11 @@ class EnvelopeGenerator extends Component {
   shaper.io.baseIndex    := accumulator.io.baseIndex
   shaper.io.fraction     := accumulator.io.fraction
   shaper.io.curveSelect  := ctrl.io.curveSelect
-  shaper.io.sustainLevel := io.config.sustain
   shaper.io.activeStage  := ctrl.io.activeStage
   shaper.io.accumDir     := ctrl.io.accumDir
 
   // Connecting Top-Level inputs to Ctrl
   ctrl.io.syncIn         := io.syncIn
-  ctrl.io.midiClock      := io.midiClock
   ctrl.io.config         := io.config
 
   // Top-Level Outputs connected to Shaper

@@ -19,14 +19,12 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Initialize inputs to safe defaults
       dut.io.phaseTick #= false
       dut.io.syncIn #= false
-      dut.io.midiClock #= false
       dut.io.config.ctrl #= 0
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
       dut.io.config.sustain #= 0
       dut.io.config.release #= 0
-      dut.io.config.syncCtrl #= 0
-      dut.io.config.phaseOffset #= 0
+      dut.io.config.gate #= 0
       dut.clockDomain.waitSampling()
 
       // ---------------------------------------------------------------------
@@ -36,6 +34,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       dut.io.phaseTick #= true
       dut.io.syncIn #= true
       dut.io.config.ctrl #= 0xFF
+      dut.io.config.gate #= 0xFF
       dut.io.config.attack #= 128
       
       // Verify outputs remain strictly quiet during the natural active reset phase of forkStimulus
@@ -51,6 +50,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       dut.io.phaseTick #= false
       dut.io.syncIn #= false
       dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       dut.io.config.attack #= 0
       println("EnvelopeGenerator Power-On Reset & Boot Stability verified successfully.")
 
@@ -62,7 +62,8 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Configure Linear ADSR: 
       // attack = 0 (Minimum transient: 0.5 ms -> increment = 357914)
       // sustain = 128 (scaled unipolar sustain level of 512)
-      dut.io.config.ctrl #= 2 // Gate ON
+      dut.io.config.ctrl #= 1 // Enable ON
+      dut.io.config.gate #= 1 // Gate ON
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
       dut.io.config.sustain #= 128
@@ -88,11 +89,13 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       
       // Reset generator to IDLE
       dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       sleep(1)
       dut.clockDomain.waitSampling(5) // Allow pipeline to settle
       
       // Gate ON at Cycle 0
-      dut.io.config.ctrl #= 2
+      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.gate #= 1 // Gate ON
       sleep(1) // Settle Gate ON input before clocking
       
       // Verify first output appears exactly after Cycle 3 and starts climbing after Cycle 50
@@ -112,7 +115,8 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Simultaneous Gate & Sync Conflict Resolution:")
       
       // Pulse Gate ON and syncIn High at the same clock cycle
-      dut.io.config.ctrl #= 2
+      dut.io.config.ctrl #= 1
+      dut.io.config.gate #= 1
       dut.io.syncIn #= true
       sleep(1) // Settle inputs
       dut.clockDomain.waitSampling()
@@ -130,10 +134,10 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       
       // Rapidly toggle the gate ON and OFF every 2 clock cycles to simulate keyboard bouncing
       for (i <- 1 to 5) {
-        dut.io.config.ctrl #= 2 // ON
+        dut.io.config.gate #= 1 // ON
         sleep(1)
         dut.clockDomain.waitSampling(2)
-        dut.io.config.ctrl #= 0 // OFF
+        dut.io.config.gate #= 0 // OFF
         sleep(1)
         dut.clockDomain.waitSampling(2)
       }
@@ -150,13 +154,14 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Mid-Flight Wave-Shaping Curve Switching:")
       
       // Trigger a standard Linear Envelope rise
-      dut.io.config.ctrl #= 2
+      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.gate #= 1 // Gate ON
       dut.io.config.attack #= 0
       sleep(1)
       dut.clockDomain.waitSampling(5)
       
-      // Change curve selection to Exponential (ctrl[6:5] = 01 -> value = 0x22) mid-transition
-      dut.io.config.ctrl #= 0x22
+      // Change curve selection to Exponential (ctrl[5:4] = 01, Enable = 1 -> value = 17 or 0x11) mid-transition
+      dut.io.config.ctrl #= 17
       sleep(1)
       dut.clockDomain.waitSampling()
       
@@ -177,7 +182,8 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Full ADSR State Transition and Output Verification:")
       
       // Configure linear ADSR: Sustain = 128 (512)
-      dut.io.config.ctrl #= 2 // Gate ON, Envelope Enable
+      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.gate #= 1 // Gate ON, Envelope Enable
       dut.io.config.sustain #= 128
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
@@ -211,7 +217,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       assert(valAtSustain >= 512 && valAtSustain <= 525, s"SUSTAIN Level: Expected close to 512, got $valAtSustain")
       
       // 6. Transition to RELEASE (stage 4) by toggling Gate OFF
-      dut.io.config.ctrl #= 0
+      dut.io.config.gate #= 0
       sleep(1)
       dut.clockDomain.waitSampling(2) // FSM transitions to RELEASE
       

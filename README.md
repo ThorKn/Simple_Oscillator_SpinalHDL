@@ -230,13 +230,12 @@ Right now there is only one command.
 | `0x03` | `WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
 | `0x04` | `PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
 | `0x05` | `VOLUME` | Master output volume (Reserved) | 8 bit |
-| `0x40` | `ENV_CTRL` | Envelope Control: [0] Enable, [1] Gate, [2] Loop, [3] Ping-Pong, [4] Reverse, [6:5] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
+| `0x40` | `ENV_CTRL` | Envelope Control: [0] Enable, [1] Hard Sync Enable, [2] Loop, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
 | `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
 | `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
 | `0x43` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
 | `0x44` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
-| `0x45` | `ENV_SYNC_CTRL` | Sync Config: [0] Hard Sync, [1] Soft Sync, [2] MIDI Sync, [6:3] Clock Division Rate | 8 bit |
-| `0x46` | `ENV_PHASE_OFFSET`| Phase offset value (0 to 255) | 8 bit |
+| `0x45` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
 
 ---
 
@@ -333,7 +332,6 @@ sample = phase[23:8]
 ```
 
 ---
-
 ## Square
 
 Generated using the phase accumulator MSB.
@@ -426,7 +424,7 @@ The top-level `EnvelopeGenerator` module integrates the submodules and registers
 |                                                             |
 |  Sync In ────┬─> [ EnvelopeCtrl ]                           |
 |  Regs In ────┘        │ (SM, Sync, Rate LUTs)               |
-|                       │                                     |
+|  (config)             │                                     |
 |                       v Increment / Reset                   |
 |                  [ EnvelopeAccumulator ]                    |
 |                       │ (32-bit Phase Counter)              |
@@ -450,13 +448,10 @@ The top-level `EnvelopeGenerator` operates directly on the 24 MHz main system cl
 
 ```scala
 val io = new Bundle {
-  // Inputs
-  val phaseTick = in Bool()                 // Heartbeat tick synced with 480 kHz sample rate
-  val syncIn    = in Bool()                 // External trigger for Hard or Soft Sync
-  val midiClock = in Bool()                 // External MIDI clock tick (24 PPQN pulse)
+  val phaseTick = in Bool()                 // 480 kHz audio rate tick
+  val syncIn    = in Bool()                 // Trigger for Hard Sync
   val config    = in(EnvelopeConfig())      // Packaged register configurations
 
-  // Outputs
   val envelopeOut       = master(Flow(UInt(10 bits))) // Unipolar output (0 to 1023)
   val envelopeOutSigned = master(Flow(SInt(10 bits))) // Bipolar output (-512 to +511)
 }
@@ -475,8 +470,7 @@ case class EnvelopeConfig() extends Bundle {
   val decay       = UInt(8 bits)
   val sustain     = UInt(8 bits)
   val release     = UInt(8 bits)
-  val syncCtrl    = Bits(8 bits)
-  val phaseOffset = UInt(8 bits)
+  val gate        = Bits(8 bits)
 }
 ```
 
@@ -485,13 +479,14 @@ The following registers are mapped into the `spinalSynth` SPI/UART register bus 
 
 | Register Address (Hex) | Register Name | Bit Width | Description |
 | :--- | :--- | :---: | :--- |
-| `0x40` | `ENV_CTRL` | 8 bits | Control bits: `[0]` Enable, `[1]` Gate, `[2]` Loop (LFO), `[3]` Ping-Pong (Reserved Placeholder), `[4]` Reverse (Reserved Placeholder), `[6:5]` Curve Model (`00`=Lin, `01`=Exp, `10`=Log, `11`=S-Curve) |
-| `0x41` | `ENV_ATTACK` | 8 bits | Attack rate coefficient (speed of phase accumulator in Attack) |
-| `0x42` | `ENV_DECAY` | 8 bits | Decay rate coefficient |
-| `0x43` | `ENV_SUSTAIN` | 8 bits | Sustain Level (0 to 255, scaled to 10-bit range internally) |
-| `0x44` | `ENV_RELEASE` | 8 bits | Release rate coefficient |
-| `0x45` | `ENV_SYNC_CTRL` | 8 bits | Sync config: `[0]` Hard Sync Enable, `[1]` Soft Sync Enable, `[2]` MIDI Sync Enable, `[6:3]` Clock Division Rate |
-| `0x46` | `ENV_PHASE_OFFSET`| 8 bits | Phase offset value (0 to 255 representing 0 to 360 degrees) |
+| `0x40` | `ENV_CTRL` | 8 bits | Control bits: <br> `[0]` Env Gen Enable, <br> `[1]` Hard Sync Enable, <br> `[2]` Loop mode, <br> `[5:4]` Curve Model <br> (`00`=Lin, `01`=Exp, <br> `10`=Log, `11`=S-Curve) |
+| `0x41` | `ENV_ATTACK` | 8 bits | Attack rate (time duration mapped) |
+| `0x42` | `ENV_DECAY` | 8 bits | Decay rate (time duration mapped) |
+| `0x43` | `ENV_SUSTAIN` | 8 bits | Sustain Level |
+| `0x44` | `ENV_RELEASE` | 8 bits | Release rate (time duration mapped)|
+| `0x45` | `ENV_GATE` | 8 bits | Gate/Sync triggers: <br> `[0]` Gate ON/OFF, <br> `[1]` Software Hard Sync |
+
+Bits that do not appear in the mapping above are just unused right now.
 
 ---
 
@@ -503,8 +498,6 @@ The following registers are mapped into the `spinalSynth` SPI/UART register bus 
 There are different modes for the ADSR playback envelopes and shapes:
 * **Normal (One-Shot):** Triggers on Gate ON, transitions from Attack to Decay to Sustain, and goes to Release on Gate OFF.
 * **Looping (LFO Mode):** The envelope automatically loops back to the start of the Attack phase once the Decay phase finishes.
-* **Reverse Mode (Reserved Placeholder):** Retained in register map; not implemented in active RTL logic.
-* **Ping-Pong Mode (Reserved Placeholder):** Retained in register map; not implemented in active RTL logic.
 
 ```text
   Normal (One-Shot):
@@ -524,12 +517,43 @@ There are different modes for the ADSR playback envelopes and shapes:
 
 ```
 
-### 9.2.2 Sync and Phase
-* **Hard Sync:** An external sync trigger instantly resets the current envelope phase accumulator back to 0 (start of Attack) and restarts the state machine.
-* **Soft Sync (Reserved Placeholder):** Bypassed in current active RTL.
-* **MIDI Sync & Clock Division (Reserved Placeholder):** Bypassed in current active RTL.
+### 9.2.2 Gate ON/OFF and Hard Sync
+* **Gate ON:** Triggers the ADSR envelope to start from the ATTACK phase.
+* **Gate OFF:** Triggers the ADSR envelope to go to the RELEASE phase.
+* **Hard Sync:** Trigger to instantly reset the Accumulator and send the state machine to ATTACK.
 
-### 9.2.3 AD(S)R Lengths: Time Duration Mapping
+For the exact transitions see the state machine diagram below.
+
+### 9.2.3 State Machine
+
+```mermaid
+%%{init: { 'themeVariables': { 'fontSize': '18px' } } }%%
+stateDiagram-v2
+    direction LR
+    %% Main Happy Path (Linear ADSR Sequence)
+    [*] --> IDLE: Power-On
+    %% Note to document the global interrupt resets to avoid arrow clutter
+    note left of IDLE
+      <b>Global:</b>
+      • hardSync triggers 
+      ATTACK from any state.
+      • Gate OFF triggers 
+      RELEASE from 
+      ATTACK/DECAY/SUSTAIN.
+    end note
+    IDLE --> ATTACK: Gate ON
+    ATTACK --> DECAY: segmentDone
+    DECAY --> SUSTAIN: segmentDone\n(No Loop)
+    SUSTAIN --> RELEASE: Gate OFF
+    RELEASE --> IDLE: segmentDone
+    %% Alternative Paths & Loops
+    DECAY --> ATTACK: segmentDone\n(Loop Mode)
+    RELEASE --> ATTACK: Gate ON
+    
+
+```
+
+### 9.2.4 AD(S)R Lengths: Time Duration Mapping
 In synthesizer design, how parameter values map to actual time durations directly determines the musical feel of the instrument. 
 
 #### Why Linear Mapping Fails

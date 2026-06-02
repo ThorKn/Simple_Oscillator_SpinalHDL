@@ -112,7 +112,7 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
 ### Input Stimulus & Signals
 * `io.regWrite`: `Flow[RegisterWrite]` (containing 8-bit `address` and 8-bit `data`)
 * `io.config`: `OscillatorConfig` (output bundle containing `freqWord`, `waveSelect`, `pwmWidth`, `volume`)
-* `io.envConfig`: `EnvelopeConfig` (output bundle containing `ctrl`, `attack`, `decay`, `sustain`, `release`, `syncCtrl`, `phaseOffset`)
+* `io.envConfig`: `EnvelopeConfig` (output bundle containing `ctrl`, `attack`, `decay`, `sustain`, `release`, `gate`)
 
 ### Test Cases
 
@@ -137,21 +137,20 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
      * *Assertion*: Verify that on the next clock cycle, the active output `config.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
 
 ####  1.2.4 Envelope Parameter Updates
-* **Action**: Write individually to all seven envelope registers using `io.regWrite`:
+* **Action**: Write individually to all six envelope registers using `io.regWrite`:
   - Write `0x15` to `0x40` (`ENV_CTRL`)
   - Write `0x0A` to `0x41` (`ENV_ATTACK`)
   - Write `0x1F` to `0x42` (`ENV_DECAY`)
   - Write `0x80` to `0x43` (`ENV_SUSTAIN`)
   - Write `0x2C` to `0x44` (`ENV_RELEASE`)
-  - Write `0x05` to `0x45` (`ENV_SYNC_CTRL`)
-  - Write `0xFF` to `0x46` (`ENV_PHASE_OFFSET`)
-* **Assertion**: Verify that the corresponding output fields in `io.envConfig` (`ctrl`, `attack`, `decay`, `sustain`, `release`, `syncCtrl`, `phaseOffset`) are updated to the written values on the next clock cycle.
+  - Write `0x01` to `0x45` (`ENV_GATE`)
+* **Assertion**: Verify that the corresponding output fields in `io.envConfig` (`ctrl`, `attack`, `decay`, `sustain`, `release`, `gate`) are updated to the written values on the next clock cycle.
 
 ####  1.2.5 Address Crosstalk & Channel Isolation
 * **Action**: Perform crosstalk validation across register regions:
   1. Write arbitrary values to all oscillator registers (`0x00` through `0x05`).
      * *Assertion*: Verify that all envelope fields in `io.envConfig` remain completely unchanged.
-  2. Write arbitrary values to all envelope registers (`0x40` through `0x46`).
+  2. Write arbitrary values to all envelope registers (`0x40` through `0x45`).
      * *Assertion*: Verify that all oscillator fields in `io.config` remain completely unchanged.
 
 ---
@@ -309,7 +308,6 @@ Verifies the ADSR state machine FSM built using SpinalHDL's `StateMachine` libra
 
 ###  Input Stimulus & Signals
 * `io.syncIn`: `Bool` (Hard/Soft sync line)
-* `io.midiClock`: `Bool` (MIDI clock division reference)
 * `io.config`: `EnvelopeConfig` (Input registers)
 * `io.segmentDone`: `Bool` (Accumulator target completion)
 * `io.resetAccum`: `Bool` (Output to reset accumulator register)
@@ -322,7 +320,7 @@ Verifies the ADSR state machine FSM built using SpinalHDL's `StateMachine` libra
 ###  Test Cases
 
 ####  1.7.1 Reset Stability
-* **Action**: Assert active-high `reset` for 5 clock cycles while driving random stimulus values on `io.syncIn`, `io.midiClock`, `io.config`, and `io.segmentDone`.
+* **Action**: Assert active-high `reset` for 5 clock cycles while driving random stimulus values on `io.syncIn`, `io.config`, and `io.segmentDone`.
 * **Assertion**: Verify that all control outputs are strictly held at their idle states: `io.resetAccum = False`, `io.runAccum = False`, `io.accumDir = False`, `io.phaseInc = 0`, `io.curveSelect = 0`, and `io.activeStage = 0`.
 
 ####  1.7.2 Normal ADSR State Transitions
@@ -508,7 +506,6 @@ Verifies the integration of the three submodules, validating the complete 3-cycl
 ###  Input Stimulus & Signals
 * `io.phaseTick`: `Bool`
 * `io.syncIn`: `Bool`
-* `io.midiClock`: `Bool`
 * `io.config`: `EnvelopeConfig`
 * `io.envelopeOut`: `Flow[UInt]`
 * `io.envelopeOutSigned`: `Flow[SInt]`

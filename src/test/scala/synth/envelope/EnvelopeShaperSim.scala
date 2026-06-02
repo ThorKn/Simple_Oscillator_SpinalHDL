@@ -20,7 +20,6 @@ class EnvelopeShaperSim extends AnyFunSuite {
       dut.io.baseIndex #= 0
       dut.io.fraction #= 0
       dut.io.curveSelect #= 0
-      dut.io.sustainLevel #= 0
       dut.io.activeStage #= 0
       dut.io.accumDir #= false      // Wait 1 clock cycle to stabilize signals under active reset
       dut.clockDomain.waitSampling()

@@ -34,8 +34,7 @@ class RegisterBank extends Component {
   val envDecayReg       = Reg(Bits(8 bits)) init(0)
   val envSustainReg     = Reg(Bits(8 bits)) init(0)
   val envReleaseReg     = Reg(Bits(8 bits)) init(0)
-  val envSyncCtrlReg    = Reg(Bits(8 bits)) init(0)
-  val envPhaseOffsetReg = Reg(Bits(8 bits)) init(0)
+  val envGateReg        = Reg(Bits(8 bits)) init(0)
 
   // --------------------------------------------------------------------------
   // Register Write Logic
@@ -102,14 +101,9 @@ class RegisterBank extends Component {
         envReleaseReg := io.regWrite.payload.data
       }
 
-      // Envelope Sync Control (ENV_SYNC_CTRL)
+      // Envelope Gate (ENV_GATE)
       is(U"8'x45") {
-        envSyncCtrlReg := io.regWrite.payload.data
-      }
-
-      // Envelope Phase Offset (ENV_PHASE_OFFSET)
-      is(U"8'x46") {
-        envPhaseOffsetReg := io.regWrite.payload.data
+        envGateReg := io.regWrite.payload.data
       }
     }
   }
@@ -143,8 +137,7 @@ class RegisterBank extends Component {
   val syncedEnvDecay       = RegNext(envDecayReg.asUInt) init(0)
   val syncedEnvSustain     = RegNext(envSustainReg.asUInt) init(0)
   val syncedEnvRelease     = RegNext(envReleaseReg.asUInt) init(0)
-  val syncedEnvSyncCtrl    = RegNext(envSyncCtrlReg) init(0)
-  val syncedEnvPhaseOffset = RegNext(envPhaseOffsetReg.asUInt) init(0)
+  val syncedEnvGate       = RegNext(envGateReg) init(0)
 
   // --------------------------------------------------------------------------
   // Outputs
@@ -160,6 +153,5 @@ class RegisterBank extends Component {
   io.envConfig.decay       := syncedEnvDecay
   io.envConfig.sustain     := syncedEnvSustain
   io.envConfig.release     := syncedEnvRelease
-  io.envConfig.syncCtrl    := syncedEnvSyncCtrl
-  io.envConfig.phaseOffset := syncedEnvPhaseOffset
+  io.envConfig.gate        := syncedEnvGate
 }

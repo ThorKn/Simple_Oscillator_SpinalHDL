@@ -31,8 +31,7 @@ case class EnvelopeConfig() extends Bundle {
   val decay       = UInt(8 bits)
   val sustain     = UInt(8 bits)
   val release     = UInt(8 bits)
-  val syncCtrl    = Bits(8 bits)
-  val phaseOffset = UInt(8 bits)
+  val gate        = Bits(8 bits)
 }
 
 // Stage constants for the Envelope Generator FSM

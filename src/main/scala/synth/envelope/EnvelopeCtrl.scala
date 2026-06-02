@@ -9,7 +9,6 @@ class EnvelopeCtrl extends Component {
   val io = new Bundle {
     // Inputs
     val syncIn      = in Bool()
-    val midiClock   = in Bool()
     val config      = in(EnvelopeConfig())
     val segmentDone = in Bool()
 
@@ -24,8 +23,8 @@ class EnvelopeCtrl extends Component {
     val activeStage  = out UInt(3 bits)       // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
   }
 
-  // Gate input is mapped to bit 1 of the ctrl register
-  val gateOn = io.config.ctrl(1)
+  // Gate input is mapped to bit 0 of the gate register
+  val gateOn = io.config.gate(0)
 
   // -------------------------------------------------------------------------
   // Logarithmic Increment ROM Mapping (256 words x 22 bits)
@@ -55,12 +54,17 @@ class EnvelopeCtrl extends Component {
   // -------------------------------------------------------------------------
   // Control Parameters & Edge Logic
   // -------------------------------------------------------------------------
-  // Curve Select: ctrl[6:5]
-  io.curveSelect := io.config.ctrl(6 downto 5).asUInt
+  // Curve Select: ctrl[5:4]
+  io.curveSelect := io.config.ctrl(5 downto 4).asUInt
 
-  // Hard Sync: Rising edge detection on syncIn qualified with syncCtrl[0] (Hard Sync Enable) and reset inactive
+  // Hard Sync: Rising edge detection on syncIn (hardware) or gate(1) (software) qualified with ctrl[1] (Hard Sync Enable) and reset inactive
   val syncInD1 = RegNext(io.syncIn) init(false)
-  val hardSyncPulse = io.syncIn && !syncInD1 && io.config.syncCtrl(0) && !ClockDomain.current.isResetActive
+  val hwSyncPulse = io.syncIn && !syncInD1
+
+  val swSyncD1 = RegNext(io.config.gate(1)) init(false)
+  val swSyncPulse = io.config.gate(1) && !swSyncD1
+
+  val hardSyncPulse = (hwSyncPulse || swSyncPulse) && io.config.ctrl(1) && !ClockDomain.current.isResetActive
 
   // Direction control: Dynamically count downwards during DECAY and RELEASE phases.
   // Note: ctrl(4) (Reverse Mode) and ctrl(3) (Ping-Pong Mode) are reserved as future placeholders.

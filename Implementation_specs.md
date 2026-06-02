@@ -386,13 +386,10 @@ The `EnvelopeGenerator` top-level wrapper acts as the coordinator. It encapsulat
 ```scala
 class EnvelopeGenerator extends Component {
   val io = new Bundle {
-    // Clock Heartbeat & Sync inputs
-    val phaseTick = in Bool()                 // Heartbeat tick synced with 480 kHz audio rate
-    val syncIn    = in Bool()                 // External trigger for Hard or Soft Sync
-    val midiClock = in Bool()                 // External MIDI clock tick (24 PPQN pulse)
+    val phaseTick = in Bool()                 // 480 kHz audio rate tick
+    val syncIn    = in Bool()                 // Trigger for Hard Sync
     val config    = in(EnvelopeConfig())      // Packaged register configurations
 
-    // System Outputs
     val envelopeOut       = master(Flow(UInt(10 bits))) // Unipolar output (0 to 1023)
     val envelopeOutSigned = master(Flow(SInt(10 bits))) // Bipolar output (-512 to +511)
   }
@@ -403,31 +400,35 @@ class EnvelopeGenerator extends Component {
 The wrapper instantiates the submodules and wires their control signals. The outputs from the `EnvelopeShaper` are driven directly to the system audio/control busses.
 
 ```scala
-val ctrl        = new EnvelopeCtrl()
-val accumulator = new EnvelopeAccumulator()
-val shaper      = new EnvelopeShaper()
+  // Instantiate submodules
+  val ctrl        = new EnvelopeCtrl()
+  val accumulator = new EnvelopeAccumulator()
+  val shaper      = new EnvelopeShaper()
 
-// Connecting Ctrl to Accumulator
-accumulator.io.resetAccum   := ctrl.io.resetAccum
-accumulator.io.runAccum     := ctrl.io.runAccum
-accumulator.io.accumDir     := ctrl.io.accumDir
-accumulator.io.phaseInc     := ctrl.io.phaseInc
-accumulator.io.sustainLevel := io.config.sustain
-accumulator.io.activeStage  := ctrl.io.activeStage
-ctrl.io.segmentDone         := accumulator.io.segmentDone
+  // Connecting Ctrl to Accumulator
+  accumulator.io.resetAccum   := ctrl.io.resetAccum
+  accumulator.io.runAccum     := ctrl.io.runAccum
+  accumulator.io.accumDir     := ctrl.io.accumDir
+  accumulator.io.phaseInc     := ctrl.io.phaseInc
+  accumulator.io.sustainLevel := io.config.sustain
+  accumulator.io.activeStage  := ctrl.io.activeStage
+  ctrl.io.segmentDone         := accumulator.io.segmentDone
 
-// Connecting Accumulator and Ctrl to Shaper
-shaper.io.phaseTick    := io.phaseTick
-shaper.io.baseIndex    := accumulator.io.baseIndex
-shaper.io.fraction     := accumulator.io.fraction
-shaper.io.curveSelect  := ctrl.io.curveSelect
-shaper.io.sustainLevel := io.config.sustain
-shaper.io.activeStage  := ctrl.io.activeStage
-shaper.io.accumDir     := ctrl.io.accumDir
+  // Connecting Accumulator and Ctrl to Shaper
+  shaper.io.phaseTick    := io.phaseTick
+  shaper.io.baseIndex    := accumulator.io.baseIndex
+  shaper.io.fraction     := accumulator.io.fraction
+  shaper.io.curveSelect  := ctrl.io.curveSelect
+  shaper.io.activeStage  := ctrl.io.activeStage
+  shaper.io.accumDir     := ctrl.io.accumDir
 
-// Top-Level Outputs
-io.envelopeOut       <> shaper.io.envelopeOut
-io.envelopeOutSigned <> shaper.io.envelopeOutSigned
+  // Connecting Top-Level inputs to Ctrl
+  ctrl.io.syncIn         := io.syncIn
+  ctrl.io.config         := io.config
+
+  // Top-Level Outputs connected to Shaper
+  io.envelopeOut       <> shaper.io.envelopeOut
+  io.envelopeOutSigned <> shaper.io.envelopeOutSigned
 ```
 
 ## 6.2 EnvelopeCtrl
@@ -441,19 +442,18 @@ class EnvelopeCtrl extends Component {
   val io = new Bundle {
     // Inputs from Top Wrapper
     val syncIn      = in Bool()
-    val midiClock   = in Bool()
     val config      = in(EnvelopeConfig())
-    val segmentDone = in Bool()               // High when accumulator sweeps to target limit
+    val segmentDone = in Bool()   // High when accumulator sweeps to target limit
 
     // Outputs to Accumulator
     val resetAccum  = out Bool()
     val runAccum    = out Bool()
-    val accumDir    = out Bool()              // 0 = Forward, 1 = Reverse
+    val accumDir    = out Bool()  // 0 = Forward, 1 = Reverse
     val phaseInc    = out UInt(22 bits)
 
     // Outputs to Shaper
     val curveSelect = out UInt(2 bits)
-    val activeStage = out UInt(3 bits)       // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
+    val activeStage = out UInt(3 bits) // IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4
   }
 }
 ```
@@ -491,11 +491,8 @@ It controls the envelope stages using five main states:
 
 ### Playback & Sync Controller
 * **Looping (LFO Mode):** When `config.ctrl[2]` (Loop Enable) is active, transitioning out of `DECAY` loops instantly back to `ATTACK` instead of going to `SUSTAIN`.
-* **Reverse Mode (Reserved Placeholder):** Config register `config.ctrl[4]` is reserved for future expansion; bypassed in current active RTL.
-* **Ping-Pong Mode (Reserved Placeholder):** Config register `config.ctrl[3]` is reserved for future expansion; bypassed in current active RTL.
 * **Sync Logic:**
   * **Hard Sync:** A rising edge on `syncIn` forces the FSM back to `ATTACK` and sets `resetAccum := True`.
-  * **MIDI Sync (Reserved Placeholder):** Port `midiClock` is a placeholder for future tempo-synced clock divisions.
 
 ### Logarithmic Time-to-Increment Lookup Table (ROM)
 Calculating the logarithmic time-duration mapping at runtime requires expensive divisor blocks. To ensure ASIC portability, the 256 increment coefficients are computed in Scala at compile-time and instantiated as a static hardware ROM (`Mem` in SpinalHDL).

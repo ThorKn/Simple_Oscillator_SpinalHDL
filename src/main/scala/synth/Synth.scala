@@ -59,7 +59,6 @@ class Synth extends Component {
     oscillator.io.phaseTick        := timingGen.io.phaseTick
     envGen.io.phaseTick            := timingGen.io.phaseTick
     envGen.io.syncIn               := False
-    envGen.io.midiClock            := False
 
     val alignedSampleTick          = Delay(timingGen.io.sampleTick, cycleCount = 2)
     decimator.io.sampleTick        := alignedSampleTick
