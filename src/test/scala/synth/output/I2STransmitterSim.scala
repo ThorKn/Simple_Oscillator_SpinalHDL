@@ -44,6 +44,10 @@ class I2STransmitterSim extends AnyFunSuite {
       // Wait for the exact start of Left-channel serialization (lrclk goes Low)
       dut.clockDomain.waitSamplingWhere(!dut.io.lrclk.toBoolean)
 
+      // Skip the 1-BCLK delay slot in standard I2S before checking the active channel bits
+      dut.clockDomain.waitSamplingWhere(dut.io.bclk.toBoolean)
+      dut.clockDomain.waitSamplingWhere(!dut.io.bclk.toBoolean)
+
       // The serialization outputs bits MSB first (bit 15 to 0)
       for (bitIndex <- 15 to 0 by -1) {
         // Wait until BCLK goes High (middle of the bit interval) to sample the data cleanly
@@ -71,28 +75,25 @@ class I2STransmitterSim extends AnyFunSuite {
       // Wait for the start of Left channel frame
       dut.clockDomain.waitSamplingWhere(!dut.io.lrclk.toBoolean)
 
-      // Helper to measure and assert a single bit-clock period (falling edge to falling edge)
-      def checkBitInterval(expectedCycles: Int, bitLabel: String): Unit = {
-        val start = simTime()
+      // Capture the simulation times of the next 9 falling edges of BCLK (including the start of BCLK 0)
+      val fallingEdgeTimes = new scala.collection.mutable.ArrayBuffer[Long]()
+      fallingEdgeTimes += simTime() // Falling edge of BCLK 31 / start of BCLK 0
+      for (_ <- 0 until 8) {
         dut.clockDomain.waitSamplingWhere(dut.io.bclk.toBoolean)
         dut.clockDomain.waitSamplingWhere(!dut.io.bclk.toBoolean)
-        dut.clockDomain.waitSamplingWhere(dut.io.bclk.toBoolean)
-        val stop = simTime()
-        
-        val interval = (stop - start) / 10
-        println(f" [$bitLabel%-6s] Expected cycles: $expectedCycles | Actual: $interval")
-        assert(interval == expectedCycles, s"Timing pattern error at $bitLabel: expected $expectedCycles cycles, got $interval")
+        fallingEdgeTimes += simTime()
       }
 
-      // Verify the 8-step cycles per bit pattern: 16, 16, 15, 16, 16, 15, 16, 15
-      checkBitInterval(16, "Bit 0")
-      checkBitInterval(16, "Bit 1")
-      checkBitInterval(15, "Bit 2")
-      checkBitInterval(16, "Bit 3")
-      checkBitInterval(16, "Bit 4")
-      checkBitInterval(15, "Bit 5")
-      checkBitInterval(16, "Bit 6")
-      checkBitInterval(15, "Bit 7")
+      // Verify the intervals between the falling edges match the pattern table:
+      // 16, 16, 15, 16, 16, 15, 16, 15
+      val expectedPatterns = Array(16, 16, 15, 16, 16, 15, 16, 15)
+      println(s"Falling edge times: ${fallingEdgeTimes.mkString(", ")}")
+      for (i <- 0 until 8) {
+        val interval = (fallingEdgeTimes(i + 1) - fallingEdgeTimes(i)) / 10
+        val bitLabel = s"Bit $i"
+        println(f" [$bitLabel%-6s] Expected cycles: ${expectedPatterns(i)} | Actual: $interval")
+        assert(interval == expectedPatterns(i), s"Timing pattern error at $bitLabel: expected ${expectedPatterns(i)} cycles, got $interval")
+      }
 
       // Verify full frame duration (Left + Right channel complete period = 500 cycles)
       dut.clockDomain.waitSamplingWhere(dut.io.lrclk.toBoolean)

@@ -11,35 +11,34 @@ class I2STransmitter extends Component {
     val sdata    = out Bool()
   }
 
-  // Timing Pattern Table: 16, 16, 15, 16, 16, 15, 16, 15
-  // This sequence defines the number of master clock cycles per I2S bit.
-  // Sum of sequence = 125. 125 * 4 = 500 cycles per 32-bit frame (48 kHz).
+  // Timing Pattern Table: 16, 16, 15, 16, 16, 15, 16, 15 clock cycles per bit.
+  // Average is 15.625 cycles per bit. 32 bits * 15.625 = 500 clock cycles (48 kHz).
   val patternTable = Vec(U(16, 5 bits), U(16, 5 bits), U(15, 5 bits), U(16, 5 bits),
                          U(16, 5 bits), U(15, 5 bits), U(16, 5 bits), U(15, 5 bits))
 
   val cycleCounter = Reg(UInt(5 bits)) init(15)
   val patternIndex = Reg(UInt(3 bits)) init(0)
   val bitCounter   = Reg(UInt(5 bits)) init(0)
-  val shiftReg     = Reg(UInt(16 bits)) init(0)
+  val shiftReg     = Reg(Bits(32 bits)) init(0)
   val sampleBuffer = Reg(SInt(16 bits)) init(0)
   val active       = Reg(Bool()) init(False)
 
-  // State machine logic operating at 24 MHz
-  // The 'valid' pulse from the Decimator is used as a master synchronization signal
-  // to ensure the I2S frame starts exactly when a new sample is ready.
+  // Sync / Latch input sample on valid from Decimator
   when(io.sampleIn.valid) {
-    // Synchronize frame: Start of Left channel (bit 0)
     sampleBuffer := io.sampleIn.payload
-    bitCounter   := 0
-    patternIndex := 0
-    cycleCounter := patternTable(0) - 1 // Start counting down first bit duration
-    shiftReg     := io.sampleIn.payload.asUInt  // Load MSB immediately for serialization
-    active       := True
-  } elsewhen(active) {
-    // Standard serialization state machine
+    // If not currently transmitting, start immediately
+    when(!active) {
+      active       := True
+      bitCounter   := 0
+      patternIndex := 0
+      cycleCounter := patternTable(0) - 1
+    }
+  }
+
+  // Bit timer & shifting data path
+  when(active) {
     when(cycleCounter === 0) {
-      // Bit Boundary: Occurs every 15 or 16 cycles as defined by the subpattern.
-      
+      // Bit Boundary (BCLK falling edge)
       val nextPatternIndex = (patternIndex + 1).resize(3)
       val nextBit = (bitCounter + 1).resize(5)
 
@@ -47,29 +46,24 @@ class I2STransmitter extends Component {
       cycleCounter := patternTable(nextPatternIndex) - 1
       bitCounter   := nextBit
 
-      // Serialization: Load buffer into shift register at channel start (bits 0 and 16).
-      // Otherwise, shift out the next bit.
-      when(nextBit === 0 || nextBit === 16) {
-        shiftReg := sampleBuffer.asUInt
+      // Reload shift register at the end of Slot 0
+      when(bitCounter === 0) {
+        shiftReg := sampleBuffer.asBits ## sampleBuffer.asBits
       } otherwise {
-        shiftReg := (shiftReg << 1).resize(16)
+        shiftReg := (shiftReg << 1).resize(32)
       }
     } otherwise {
       cycleCounter := cycleCounter - 1
     }
   }
 
-  // I2S Signal Assignments
+  // BCLK Generation: High for the second half of the bit duration (rising edge in the middle).
+  // Driven LOW at cycle 0 (falling edge) to launch stable data.
+  io.bclk := active && (cycleCounter < 8)
 
-  // BCLK: Approx 50% duty cycle bit clock. High for the first half of the interval.
-  // Held low while inactive.
-  io.bclk := active && (cycleCounter >= 8)
-
-  // LRCLK: Word Select. Low for Left (0-15), High for Right (16-31).
-  // Held High while inactive (standard idle state for I2S).
+  // LRCLK Generation: LOW for Left channel (slots 0 to 15), HIGH for Right channel (slots 16 to 31)
   io.lrclk := !active || (bitCounter >= 16)
 
-  // SDATA: Serial Data output (MSB first).
-  // Held low while inactive.
-  io.sdata := active && shiftReg(15)
+  // SDATA output: MSB-first
+  io.sdata := active && shiftReg(31)
 }
