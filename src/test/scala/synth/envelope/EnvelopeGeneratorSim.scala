@@ -228,14 +228,158 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       
       // 8. Verify transition to IDLE (stage 0)
       dut.clockDomain.waitSampling() // Transition to IDLE
-      // The first cycle of IDLE still reflects the last RELEASE state's active value (3) due to 1-cycle shaper RegNext latency
-      assert(dut.io.envelopeOut.payload.toInt == 3, s"T0 IDLE Level: Expected 3, got ${dut.io.envelopeOut.payload.toInt}")
+      // The first cycle of IDLE still reflects the last RELEASE state's active value (which is now correctly 0) due to 1-cycle shaper RegNext latency
+      assert(dut.io.envelopeOut.payload.toInt == 0, s"T0 IDLE Level: Expected 0, got ${dut.io.envelopeOut.payload.toInt}")
       
       dut.clockDomain.waitSampling() // Let the 1-cycle pipeline register drain to 0
       val valAtIdle = dut.io.envelopeOut.payload.toInt
       assert(valAtIdle == 0, s"IDLE Level: Expected 0, got $valAtIdle")
       
       println("Full ADSR State Transition and Output Verification verified successfully.")
+    }
+  }
+
+  test("EnvelopeGenerator - Monotonicity and Smooth Transitions (Low & Mid parameter sets)") {
+    SimConfig.withWave.compile(new EnvelopeGenerator).doSim { dut =>
+      dut.clockDomain.forkStimulus(period = 10)
+      
+      // Initialize inputs to safe defaults
+      dut.io.phaseTick #= false
+      dut.io.syncIn #= false
+      dut.io.config.ctrl #= 1 // Enable ON, Curve = 0 (Linear)
+      dut.io.config.attack #= 0
+      dut.io.config.decay #= 0
+      dut.io.config.sustain #= 0
+      dut.io.config.release #= 0
+      dut.io.config.gate #= 0
+      dut.clockDomain.waitSampling(25) // Settle reset
+
+      def runTest(attackVal: Int, decayVal: Int, sustainVal: Int, releaseVal: Int, label: String): Unit = {
+        println(s"Running test for $label...")
+        
+        // 1. Configure the envelope
+        dut.io.config.ctrl #= 1
+        dut.io.config.attack #= attackVal
+        dut.io.config.decay #= decayVal
+        dut.io.config.sustain #= sustainVal
+        dut.io.config.release #= releaseVal
+        dut.io.config.gate #= 0
+        dut.io.phaseTick #= true
+        sleep(1)
+        dut.clockDomain.waitSampling(5)
+
+        // Record history of (stage, output)
+        val history = new scala.collection.mutable.ArrayBuffer[(Int, Int)]()
+
+        // Trigger gate ON
+        dut.io.config.gate #= 1
+        sleep(1)
+
+        // Helper to record current state
+        def recordState(): Unit = {
+          if (dut.io.envelopeOut.valid.toBoolean) {
+            history += ((dut.ctrl.io.activeStage.toInt, dut.io.envelopeOut.payload.toInt))
+          }
+        }
+
+        // Run until we transition to SUSTAIN (stage 3)
+        var limit = 0
+        while (dut.ctrl.io.activeStage.toInt != 3 && limit < 10000000) {
+          dut.clockDomain.waitSampling()
+          recordState()
+          limit += 1
+        }
+        assert(limit < 10000000, "Timeout waiting for SUSTAIN stage")
+
+        // Stay in sustain for a bit
+        for (_ <- 0 until 50) {
+          dut.clockDomain.waitSampling()
+          recordState()
+        }
+
+        // Release gate
+        dut.io.config.gate #= 0
+        sleep(1)
+
+        // Run until we transition back to IDLE (stage 0)
+        limit = 0
+        while (dut.ctrl.io.activeStage.toInt != 0 && limit < 10000000) {
+          dut.clockDomain.waitSampling()
+          recordState()
+          limit += 1
+        }
+        assert(limit < 10000000, "Timeout waiting for IDLE stage")
+
+        // Wait a few more cycles to settle
+        for (_ <- 0 until 10) {
+          dut.clockDomain.waitSampling()
+          recordState()
+        }
+
+        // Group history by stage
+        println(s"Verifying monotonicity for $label:")
+        
+        val attackSamples = history.filter(_._1 == 1).map(_._2)
+        val decaySamples = history.filter(_._1 == 2).map(_._2)
+        val sustainSamples = history.filter(_._1 == 3).map(_._2)
+        val releaseSamples = history.filter(_._1 == 4).map(_._2)
+
+        // A. Attack: must only go up
+        if (attackSamples.nonEmpty) {
+          println(s"  Attack samples count: ${attackSamples.size}")
+          for (i <- 1 until attackSamples.size) {
+            assert(attackSamples(i) >= attackSamples(i - 1), 
+              s"Attack must be monotonically increasing: index $i: ${attackSamples(i)} < ${attackSamples(i-1)}")
+          }
+        }
+
+        // B. Decay: must only go down
+        if (decaySamples.nonEmpty) {
+          println(s"  Decay samples count: ${decaySamples.size}")
+          for (i <- 1 until decaySamples.size) {
+            assert(decaySamples(i) <= decaySamples(i - 1), 
+              s"Decay must be monotonically decreasing: index $i: ${decaySamples(i)} > ${decaySamples(i-1)}")
+          }
+        }
+
+        // C. Sustain: must stay constant
+        if (sustainSamples.nonEmpty) {
+          println(s"  Sustain samples count: ${sustainSamples.size}")
+          val firstSustain = sustainSamples.head
+          for (i <- 1 until sustainSamples.size) {
+            assert(sustainSamples(i) == firstSustain, 
+              s"Sustain must remain constant: index $i: ${sustainSamples(i)} != $firstSustain")
+          }
+        }
+
+        // D. Release: must only go down
+        if (releaseSamples.nonEmpty) {
+          println(s"  Release samples count: ${releaseSamples.size}")
+          for (i <- 1 until releaseSamples.size) {
+            assert(releaseSamples(i) <= releaseSamples(i - 1), 
+              s"Release must be monotonically decreasing: index $i: ${releaseSamples(i)} > ${releaseSamples(i-1)}")
+          }
+        }
+
+        // E. Transition Smoothness Verification
+        println("  Verifying stage transitions:")
+        for (i <- 0 until history.size - 1) {
+          val (stageBefore, valBefore) = history(i)
+          val (stageAfter, valAfter) = history(i + 1)
+          if (stageBefore != stageAfter) {
+            println(s"    Transition from Stage $stageBefore to $stageAfter: $valBefore -> $valAfter")
+            val diff = (valAfter - valBefore).abs
+            val maxAllowedStep = 32
+            assert(diff <= maxAllowedStep, s"Smooth transition violation from Stage $stageBefore to $stageAfter: jump size $diff too large ($valBefore -> $valAfter)")
+          }
+        }
+      }
+
+      // Test Case 1: Low parameter settings (A=1, D=1, S=16, R=1)
+      runTest(attackVal = 1, decayVal = 1, sustainVal = 16, releaseVal = 1, label = "Low Parameters")
+
+      // Test Case 2: Mid-range parameter settings (A=128, D=128, S=128, R=128)
+      runTest(attackVal = 128, decayVal = 128, sustainVal = 128, releaseVal = 128, label = "Mid-range Parameters")
     }
   }
 }

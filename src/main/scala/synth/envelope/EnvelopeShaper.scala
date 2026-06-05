@@ -106,10 +106,8 @@ class EnvelopeShaper extends Component {
   val deltaShifted = (delta << 1).resize(12 bits) // 2 * delta
   val deltaResized = delta.resize(12 bits)
 
-  // Swap interpolation fraction direction based on accumDir when counting backwards
-  val fractionAdjusted = io.accumDir ? (U(3) - io.fraction) | io.fraction
-
-  switch(fractionAdjusted) {
+  // Use raw io.fraction directly for linear interpolation in both directions
+  switch(io.fraction) {
     is(0) { interp := y0Shifted }
     is(1) { interp := y0Shifted + deltaResized }
     is(2) { interp := y0Shifted + deltaShifted }

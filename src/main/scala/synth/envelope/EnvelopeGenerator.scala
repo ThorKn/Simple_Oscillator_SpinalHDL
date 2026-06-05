@@ -1,6 +1,7 @@
 package synth.envelope
 
 import spinal.core._
+import spinal.core.sim._
 import spinal.lib._
 import synth.common.EnvelopeConfig
 
@@ -26,6 +27,7 @@ class EnvelopeGenerator extends Component {
   accumulator.io.phaseInc     := ctrl.io.phaseInc
   accumulator.io.sustainLevel := io.config.sustain
   accumulator.io.activeStage  := ctrl.io.activeStage
+  ctrl.io.activeStage.simPublic()
   ctrl.io.segmentDone         := accumulator.io.segmentDone
 
   // Connecting Accumulator and Ctrl to Shaper

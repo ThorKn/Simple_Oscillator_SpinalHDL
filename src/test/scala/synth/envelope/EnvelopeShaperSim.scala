@@ -89,11 +89,10 @@ class EnvelopeShaperSim extends AnyFunSuite {
         dut.io.fraction #= f
         dut.clockDomain.waitSampling(2)
         
-        // In reverse mode, fractionAdjusted is 3 - f.
-        // Expected unipolar output should scale as: 40 + (3 - f)
-        val expectedVal = 40 + (3 - f)
+        // Expected unipolar output should be 40 + f (monotonic and uninverted)
+        val expectedVal = 40 + f
         val actualVal = dut.io.envelopeOut.payload.toInt
-        println(s"DEBUG REVERSE: f=$f, fractionAdjusted=${3-f}, payload=$actualVal")
+        println(s"DEBUG REVERSE: f=$f, payload=$actualVal")
         assert(actualVal == expectedVal, s"[Reverse Fraction f = $f] Expected interpolated output $expectedVal, got $actualVal")
       }
       

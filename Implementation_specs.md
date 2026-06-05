@@ -596,9 +596,7 @@ val sigRom = Mem(UInt(8 bits), 257) init(sigContent)
 Linear interpolation requires the formula: `Y = Y0 + (f / 4) * (Y1 - Y0)`.
 To prevent expensive synthesis of physical multipliers on custom silicon, the fraction multiplication `(f/4) * delta_Y` is resolved in combinational shift-add structures.
 
-* **Fraction Mirroring**: When counting backwards (`accumDir = 1`), the fractional step is mirrored combinationally:
-  `fractionAdjusted = accumDir ? (3 - fraction) : fraction`
-  This ensures that linear transitions remain perfectly continuous and smooth in reverse:
+* **Direct Fraction Usage**: Since the phase accumulator register naturally counts backwards when `accumDir = 1` during Decay and Release, its fractional output bits (`fraction`) already decrement from `3` to `0`. Consequently, `io.fraction` is fed directly into the interpolation multiplexer in both directions without any modification, ensuring perfectly smooth and monotonic linear transitions.
 
 ```scala
 val y0 = UInt(8 bits)
@@ -623,7 +621,7 @@ val y0Shifted    = (y0Signed << 2).resize(12 bits) // Y0 * 4
 val deltaShifted = (delta << 1).resize(12 bits)   // 2 * delta
 val deltaResized = delta.resize(12 bits)
 
-switch(fractionAdjusted) {
+switch(io.fraction) {
   is(0) { interp := y0Shifted }
   is(1) { interp := y0Shifted + deltaResized }
   is(2) { interp := y0Shifted + deltaShifted }

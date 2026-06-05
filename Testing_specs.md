@@ -547,8 +547,20 @@ Verifies the integration of the three submodules, validating the complete 3-cycl
   - Output values remain strictly bounded within the safe unipolar/bipolar envelopes (0 to 1023) without arithmetic overflow glitches.
 
 ####  2.2.6 Dynamic Mid-Flight Curve Switching (Irrational Behavior Test)
-* **Action**: Trigger a standard linear ADSR envelope. Halfway through the `ATTACK` phase, dynamically change the curve selection register `config.ctrl[6:5]` from Linear (`00`) to Exponential (`01`) mid-transition.
+* **Action**: Trigger a standard linear ADSR envelope. Halfway through the `ATTACK` phase, dynamically change the curve selection register `config.ctrl[5:4]` from Linear (`00`) to Exponential (`01`) mid-transition.
 * **Assertion**: Verify that the wave shaper accepts the new parameter instantly on the next clock cycle and interpolates smoothly from the current amplitude value using the new exponential ROM table, without causing output signal discontinuities, pops, or wrapping glitches.
+
+####  2.2.7 Monotonicity and Smooth Transitions (Low & Mid Parameter Sets)
+* **Action**: Execute the envelope generator under two configurations:
+  1. **Low parameters**: `attack = 1`, `decay = 1`, `sustain = 16`, `release = 1`.
+  2. **Mid-range parameters**: `attack = 128`, `decay = 128`, `sustain = 128`, `release = 128`.
+  For each configuration, pulse `Gate ON`, wait for `SUSTAIN` state (stage 3) to be reached, hold for 50 cycles, pulse `Gate OFF`, and wait until it returns to `IDLE` (stage 0).
+* **Assertion**: Verify the entire envelope progression:
+  - **Attack stage**: The output must only increase (monotonically increasing) or stay equal, never decreasing.
+  - **Decay stage**: The output must only decrease (monotonically decreasing) or stay equal, never increasing.
+  - **Sustain stage**: The output must remain perfectly constant (equal to the first sustain value) throughout the stage.
+  - **Release stage**: The output must only decrease (monotonically decreasing) or stay equal, never increasing.
+  - **Transition Smoothness**: Ensure that the step difference across FSM stage transitions is small and bounded (maximum step difference of 32 in the 10-bit output range), verifying that the output transitions smoothly without value jumps or transient pops outside the expected transition boundary.
 
 ---
 
