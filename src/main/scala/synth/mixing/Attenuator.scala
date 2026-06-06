@@ -23,3 +23,4 @@ class Attenuator(volumeWidth: Int = 8) extends Component {
   io.sampleOut.payload := RegNext(scaledSample) init(0)
   io.sampleOut.valid   := RegNext(io.sampleIn.valid) init(False)
 }
+
