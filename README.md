@@ -654,20 +654,17 @@ The fractional calculation is implemented in pure combinational shift-add logic:
 | `11` | 0.75 | Y0 + (delta Y >> 1) + (delta Y >> 2) |
 
 Since the accumulator physically halts at `sustainLevel` during Sustain and counts backwards naturally during Decay and Release, **no multipliers or sustain delay pipelines are required**, making the output stage extremely area-efficient.
-
----
-
 # 10. Attenuation & Volume Control
 
 Volume level control is performed at the oversampled 480 kHz rate prior to decimation by the `Attenuator` module. To maximize reusable modularity (e.g., interfacing with an 8-bit manual volume register or a 10-bit dynamic envelope generator output), the `Attenuator` is designed as a compile-time parameterized component:
 
 * **Compile-Time Parameter:** `volumeWidth: Int = 8`
-* **Volume Input Port:** `io.volume: UInt(volumeWidth bits)`
+* **Inputs:** `io.volume: UInt(volumeWidth bits)`, `io.phaseTick: Bool` (480 kHz grid strobe)
 * **Mathematical Operation:** 
   ```text
   scaledSample = (sampleIn * volumeSigned) >> volumeWidth
   ```
-  This is implemented efficiently in hardware using a single signed multiplier and bitwise shift scaling, leaving the original sample rate and 16-bit audio resolution unaltered.
+  This is implemented efficiently in hardware using a single signed multiplier and bitwise shift scaling. To align the output flow properly with downstream blocks, the `sampleOut.valid` strobe is synchronized combinationally to the next `phaseTick` edge, introducing exactly 1 sample (1 `phaseTick` period) of latency.
 
 ---
 

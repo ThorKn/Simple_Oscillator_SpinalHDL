@@ -114,7 +114,7 @@ The module shall:
   - `Decimator`: Downsamples the 480 kHz audio sample stream to 48 kHz.
   - `I2STransmitter`: Serializes parallel audio samples into a stereo I2S bitstream.
 - **Clock & Reset Distribution**: Run all submodules synchronously inside a single 24 MHz clocking area with asynchronous active-high reset active.
-- **Register Pipeline Latency Alignment**: The cascade of two series registered attenuators introduces exactly **2 clock cycles** of registered pipeline latency between the oscillator and the decimator. The clock-enable decimated `sampleTick` is delayed by exactly 2 cycles (`Delay(timingGen.io.sampleTick, cycleCount = 2)`) to keep the Decimator perfectly aligned with the audio data stream.
+- **Natural Pipeline Delay & Flow Handshaking**: All audio modules interface using `Flow` (valid/payload) handshakes. Signals propagate timing information naturally. The `svf` module's FSM sequencer is driven directly by `timingGen.io.phaseTick` (480 kHz), and the `Decimator` downsampling is driven directly by `timingGen.io.sampleTick` (48 kHz) without requiring artificial alignment delay registers.
 - **Subsystem Isolation**: Keep Synth strictly as an abstraction/integration layer containing no DSP math details or physical protocol implementation details.
 
 ### Clocking and Reset
@@ -704,6 +704,7 @@ class Attenuator(volumeWidth: Int = 8) extends Component {
   val io = new Bundle {
     val sampleIn  = slave(Flow(SInt(16 bits)))
     val volume    = in UInt(volumeWidth bits)
+    val phaseTick = in Bool()
     val sampleOut = master(Flow(SInt(16 bits)))
   }
 }
@@ -715,7 +716,8 @@ To prevent sign-bit alignment errors during dynamic multiplication:
 2. Perform signed multiplication between the 16-bit signed input sample and `volumeSigned` to produce a product of size `16 + volumeWidth + 1` bits.
 3. Scale the product down by shifting it right by `volumeWidth` bits, and resize back to 16 bits:
    `scaledSample = (product >> volumeWidth).resize(16 bits)`
-4. Register both the scaled payload and valid signal for a 1-cycle pipeline latency.
+4. The payload register (`outReg`) updates on `sampleIn.valid` (1-sample latency).
+5. The output `sampleOut.valid` is aligned to the next `phaseTick` edge by delaying the captured valid status by 1 sample using an internal `validReg` updated on `phaseTick` and combinationally gating it with `phaseTick`.
 
 ---
 

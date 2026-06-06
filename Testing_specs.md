@@ -41,6 +41,7 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) across default 8
 ###  Input Stimulus & Signals
 * `io.sampleIn`: `Flow[SInt]` (16 bits)
 * `io.volume`: `UInt` (volumeWidth bits)
+* `io.phaseTick`: `Bool`
 * `io.sampleOut`: `Flow[SInt]` (16 bits)
 
 ### Test Cases
@@ -50,8 +51,8 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) across default 8
 * **Assertion**: Verify that `io.sampleOut.payload` is strictly held at `0` and `io.sampleOut.valid` is strictly `False`.
 
 ### 1.1.2 Mathematical Scaling
-* **Action**: Pulse `io.sampleIn.valid` high for 1 clock cycle with a specific payload and volume, then return it to `False`. Wait 1 clock cycle for the pipeline register.
-* **Assertion**: Verify that `io.sampleOut.valid` is `True` during the second cycle and its payload matches the expected fractional attenuation exactly:
+* **Action**: Pulse `io.phaseTick` and `io.sampleIn.valid` high for 1 clock cycle with a specific payload and volume, then return them to `False`. Wait 50 clock cycles (the duration of 1 sample period).
+* **Assertion**: Verify that `io.sampleOut.valid` is `True` exactly 50 cycles later (at the next `phaseTick` boundary) and its payload matches the expected fractional attenuation exactly:
   ```text
   expected = (sampleIn.payload * volume) / (2^volumeWidth)
   ```
@@ -64,17 +65,17 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) across default 8
   | `-32768` | `0` | `0` | Silent (Mute) |
 
 ### 1.1.3 Cycle-Accurate Latency & Pipelining
-* **Action**: Pulse `io.sampleIn.valid` back-to-back for 3 consecutive clock cycles with distinct samples:
-  * Cycle 1: Sample = `10000`, Volume = `255`
-  * Cycle 2: Sample = `20000`, Volume = `128`
-  * Cycle 3: Sample = `-10000`, Volume = `64`
+* **Action**: Pulse `io.phaseTick` and `io.sampleIn.valid` at consecutive sample intervals (every 50 clock cycles) with distinct samples:
+  * Cycle 0: Sample = `10000`, Volume = `255`
+  * Cycle 50: Sample = `20000`, Volume = `128`
+  * Cycle 100: Sample = `-10000`, Volume = `64`
 * **Assertion**: Verify that:
-  * Cycle 1: `sampleOut.valid` is `False`.
-  * Cycle 2: `sampleOut.valid` is `True`, payload = `9960`.
-  * Cycle 3: `sampleOut.valid` is `True`, payload = `10000`.
-  * Cycle 4: `sampleOut.valid` is `True`, payload = `-2500`.
-  * Cycle 5: `sampleOut.valid` is `False`.
-  * This confirms the 1-cycle pipeline throughput operates continuously without stalls or register leakage.
+  * Cycle 0: `sampleOut.valid` is `False`.
+  * Cycle 50 (next phaseTick): `sampleOut.valid` is `True`, payload = `9960`.
+  * Cycle 100: `sampleOut.valid` is `True`, payload = `10000`.
+  * Cycle 150: `sampleOut.valid` is `True`, payload = `-2500`.
+  * Cycle 200: `sampleOut.valid` is `False`.
+  * This confirms the 1-sample pipeline throughput operates continuously without stalls or register leakage on the `phaseTick` grid.
 
 ### 1.1.4 Parameterized 10-bit Configuration
 * **Action**: Instantiate the unit under test with `volumeWidth = 10`.
@@ -488,7 +489,7 @@ Verifies the end-to-end synthesizer system (`Synth`) for seamless hardware modul
   7. Write `0x80` (Sustain = 128) to Envelope Sustain (`0x43`).
   8. Write atomic DDS Frequency tuning word `0x080000` (Low = `0x00`, Mid = `0x00`, High = `0x08` commit to target $15\text{ kHz}$).
 * **Assertion**: Capture 25 I2S frames and verify:
-  - **Stereo Alignment**: Left and Right samples are perfectly identical for all frames.
+  - **Stereo Alignment**: Left and Right samples are perfectly identical for all frames. The testbench monitor skips Slot 0 at startup to correctly align with the continuous 32-bit frame structure where the LSB of the previous word is transmitted in Slot 0/16.
   - **Dynamic Audio Response & Envelope Modulation**: Outputs are no longer silent, and sample amplitudes scale dynamically bound under the active ADSR envelope within maximum absolute peaks (`<= 32609`), with absolute values scaling up successfully over time (`> 5000`).
 
 ---
