@@ -18,6 +18,7 @@ class AttenuatorSim extends AnyFunSuite {
       dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 20000
       dut.io.volume #= 255
+      dut.io.phaseTick #= false
       
       // Advance simulation time by 50 units (5 cycles) while reset is active
       sleep(50)
@@ -30,25 +31,47 @@ class AttenuatorSim extends AnyFunSuite {
       dut.io.sampleIn.valid #= false
       dut.io.sampleIn.payload #= 0
       dut.io.volume #= 0
+      dut.io.phaseTick #= false
       dut.clockDomain.waitSampling(100)
       println("Reset Stability verified successfully.")
 
-      // Helper to check standard mathematical scaling
+      // Helper to check standard mathematical scaling with phaseTick-alignment
       def checkScaling(sample: Int, volume: Int, expected: Int): Unit = {
+        // Start of period: Assert phaseTick and valid input sample
+        dut.io.phaseTick #= true
         dut.io.sampleIn.valid #= true
         dut.io.sampleIn.payload #= sample
         dut.io.volume #= volume
-        
         dut.clockDomain.waitSampling()
+
+        dut.io.phaseTick #= false
         dut.io.sampleIn.valid #= false
-        
-        dut.clockDomain.waitSampling()
-        // Assert output on the very next cycle (1-cycle pipeline latency)
-        assert(dut.io.sampleOut.valid.toBoolean == true, s"Expected output to be valid")
-        assert(dut.io.sampleOut.payload.toInt == expected, s"Expected $expected, got ${dut.io.sampleOut.payload.toInt}")
-        
-        dut.clockDomain.waitSampling()
-        assert(dut.io.sampleOut.valid.toBoolean == false, s"Expected output valid to drop to false")
+        dut.io.sampleIn.payload #= 0
+
+        var validAssertCount = 0
+        var cyclesToValid = 0
+        var observedPayload = 0
+        for (i <- 1 to 100) {
+          if (dut.io.sampleOut.valid.toBoolean) {
+            validAssertCount += 1
+            if (cyclesToValid == 0) {
+              cyclesToValid = i
+              observedPayload = dut.io.sampleOut.payload.toInt
+            }
+          }
+          
+          // Next phaseTick at cycle 50 (49 cycles after waitSampling above)
+          if (i == 49) {
+            dut.io.phaseTick #= true
+          } else {
+            dut.io.phaseTick #= false
+          }
+          dut.clockDomain.waitSampling()
+        }
+
+        assert(validAssertCount == 1, s"sampleOut.valid was asserted $validAssertCount times instead of exactly once")
+        assert(cyclesToValid == 50, s"Output flow valid asserted after $cyclesToValid cycles instead of 50")
+        assert(observedPayload == expected, s"Expected payload $expected, got $observedPayload")
       }
 
       println("Verifying Attenuator Test Vectors:")
@@ -58,39 +81,72 @@ class AttenuatorSim extends AnyFunSuite {
       checkScaling(-32768, 0, 0)
       println("Test Vectors passed successfully.")
 
-      // Pipelining throughput test (3 consecutive back-to-back samples)
-      println("Verifying Pipelined Throughput (Back-to-Back):")
+      // Pipelining throughput test (3 consecutive back-to-back samples on phaseTick grid)
+      println("Verifying Pipelined Throughput (Back-to-Back phaseTick cycles):")
       
-      // Cycle 1: Sample 10000, Vol 255
+      // Cycle 0: Sample 10000, Vol 255
+      dut.io.phaseTick #= true
       dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 10000
       dut.io.volume #= 255
+      sleep(1) // Combinational settling
+      
       dut.clockDomain.waitSampling() // Sample 1 is latched. Output 1 is NOT ready yet.
-      assert(dut.io.sampleOut.valid.toBoolean == false)
+      
+      dut.io.phaseTick #= false
+      dut.io.sampleIn.valid #= false
+      dut.clockDomain.waitSampling(49) // Wait until next phaseTick cycle
 
-      // Cycle 2: Sample 20000, Vol 128
+      // Cycle 50 (phaseTick 2): Sample 20000, Vol 128
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 20000
       dut.io.volume #= 128
-      dut.clockDomain.waitSampling() // Sample 2 is latched. Output 1 is READY now!
+      sleep(1) // Combinational settling
+      
       assert(dut.io.sampleOut.valid.toBoolean == true)
-      assert(dut.io.sampleOut.payload.toInt == 9960)
+      assert(dut.io.sampleOut.payload.toInt == 9960) // 10000 * 255 / 256 = 9960
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
+      dut.io.sampleIn.valid #= false
+      dut.clockDomain.waitSampling(49)
 
-      // Cycle 3: Sample -10000, Vol 64
+      // Cycle 100 (phaseTick 3): Sample -10000, Vol 64
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= -10000
       dut.io.volume #= 64
-      dut.clockDomain.waitSampling() // Sample 3 is latched. Output 2 is READY now!
+      sleep(1) // Combinational settling
+      
       assert(dut.io.sampleOut.valid.toBoolean == true)
-      assert(dut.io.sampleOut.payload.toInt == 10000)
-
-      // Cycle 4: Idle
+      assert(dut.io.sampleOut.payload.toInt == 10000) // 20000 * 128 / 256 = 10000
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
       dut.io.sampleIn.valid #= false
-      dut.clockDomain.waitSampling() // Output 3 is READY now!
-      assert(dut.io.sampleOut.valid.toBoolean == true)
-      assert(dut.io.sampleOut.payload.toInt == -2500)
+      dut.clockDomain.waitSampling(49)
 
-      // Cycle 5: Idle
-      dut.clockDomain.waitSampling() // Pipeline is empty!
+      // Cycle 150 (phaseTick 4): Idle
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= false
+      sleep(1) // Combinational settling
+      
+      assert(dut.io.sampleOut.valid.toBoolean == true)
+      assert(dut.io.sampleOut.payload.toInt == -2500) // -10000 * 64 / 256 = -2500
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
+      dut.clockDomain.waitSampling(49)
+
+      // Cycle 200 (phaseTick 5): Pipeline empty!
+      dut.io.phaseTick #= true
+      sleep(1) // Combinational settling
       assert(dut.io.sampleOut.valid.toBoolean == false)
+      dut.clockDomain.waitSampling()
 
       println("Pipelined Throughput verified successfully.")
     }
@@ -109,6 +165,7 @@ class AttenuatorSim extends AnyFunSuite {
       dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 20000
       dut.io.volume #= 1023
+      dut.io.phaseTick #= false
       
       // Advance simulation time by 50 units (5 cycles) while reset is active
       sleep(50)
@@ -121,25 +178,47 @@ class AttenuatorSim extends AnyFunSuite {
       dut.io.sampleIn.valid #= false
       dut.io.sampleIn.payload #= 0
       dut.io.volume #= 0
+      dut.io.phaseTick #= false
       dut.clockDomain.waitSampling(100)
       println("10-bit Reset Stability verified successfully.")
 
       // Helper to check standard mathematical scaling
       def checkScaling(sample: Int, volume: Int, expected: Int): Unit = {
+        // Start of period: Assert phaseTick and valid input sample
+        dut.io.phaseTick #= true
         dut.io.sampleIn.valid #= true
         dut.io.sampleIn.payload #= sample
         dut.io.volume #= volume
-        
         dut.clockDomain.waitSampling()
+
+        dut.io.phaseTick #= false
         dut.io.sampleIn.valid #= false
-        
-        dut.clockDomain.waitSampling()
-        // Assert output on the very next cycle (1-cycle pipeline latency)
-        assert(dut.io.sampleOut.valid.toBoolean == true, s"Expected output to be valid")
-        assert(dut.io.sampleOut.payload.toInt == expected, s"Expected $expected, got ${dut.io.sampleOut.payload.toInt}")
-        
-        dut.clockDomain.waitSampling()
-        assert(dut.io.sampleOut.valid.toBoolean == false, s"Expected output valid to drop to false")
+        dut.io.sampleIn.payload #= 0
+
+        var validAssertCount = 0
+        var cyclesToValid = 0
+        var observedPayload = 0
+        for (i <- 1 to 100) {
+          if (dut.io.sampleOut.valid.toBoolean) {
+            validAssertCount += 1
+            if (cyclesToValid == 0) {
+              cyclesToValid = i
+              observedPayload = dut.io.sampleOut.payload.toInt
+            }
+          }
+          
+          // Next phaseTick at cycle 50
+          if (i == 49) {
+            dut.io.phaseTick #= true
+          } else {
+            dut.io.phaseTick #= false
+          }
+          dut.clockDomain.waitSampling()
+        }
+
+        assert(validAssertCount == 1, s"sampleOut.valid was asserted $validAssertCount times instead of exactly once")
+        assert(cyclesToValid == 50, s"Output flow valid asserted after $cyclesToValid cycles instead of 50")
+        assert(observedPayload == expected, s"Expected payload $expected, got $observedPayload")
       }
 
       println("Verifying 10-bit Attenuator Test Vectors:")
@@ -153,36 +232,69 @@ class AttenuatorSim extends AnyFunSuite {
       // Pipelining throughput test (3 consecutive back-to-back samples)
       println("Verifying 10-bit Pipelined Throughput (Back-to-Back):")
       
-      // Cycle 1: Sample 10000, Vol 1023
+      // Cycle 0: Sample 10000, Vol 1023
+      dut.io.phaseTick #= true
       dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 10000
       dut.io.volume #= 1023
-      dut.clockDomain.waitSampling() // Sample 1 is latched. Output 1 is NOT ready yet.
-      assert(dut.io.sampleOut.valid.toBoolean == false)
+      sleep(1) // Combinational settling
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
+      dut.io.sampleIn.valid #= false
+      dut.clockDomain.waitSampling(49)
 
-      // Cycle 2: Sample 20000, Vol 512
+      // Cycle 50 (phaseTick 2): Sample 20000, Vol 512
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= 20000
       dut.io.volume #= 512
-      dut.clockDomain.waitSampling() // Sample 2 is latched. Output 1 is READY now!
+      sleep(1) // Combinational settling
+      
       assert(dut.io.sampleOut.valid.toBoolean == true)
       assert(dut.io.sampleOut.payload.toInt == 9990) // 10000 * 1023 / 1024 = 9990
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
+      dut.io.sampleIn.valid #= false
+      dut.clockDomain.waitSampling(49)
 
-      // Cycle 3: Sample -10000, Vol 256
+      // Cycle 100 (phaseTick 3): Sample -10000, Vol 256
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= true
       dut.io.sampleIn.payload #= -10000
       dut.io.volume #= 256
-      dut.clockDomain.waitSampling() // Sample 3 is latched. Output 2 is READY now!
+      sleep(1) // Combinational settling
+      
       assert(dut.io.sampleOut.valid.toBoolean == true)
       assert(dut.io.sampleOut.payload.toInt == 10000) // 20000 * 512 / 1024 = 10000
-
-      // Cycle 4: Idle
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
       dut.io.sampleIn.valid #= false
-      dut.clockDomain.waitSampling() // Output 3 is READY now!
+      dut.clockDomain.waitSampling(49)
+
+      // Cycle 150 (phaseTick 4): Idle
+      dut.io.phaseTick #= true
+      dut.io.sampleIn.valid #= false
+      sleep(1) // Combinational settling
+      
       assert(dut.io.sampleOut.valid.toBoolean == true)
       assert(dut.io.sampleOut.payload.toInt == -2500) // -10000 * 256 / 1024 = -2500
+      
+      dut.clockDomain.waitSampling()
+      
+      dut.io.phaseTick #= false
+      dut.clockDomain.waitSampling(49)
 
-      // Cycle 5: Idle
-      dut.clockDomain.waitSampling() // Pipeline is empty!
+      // Cycle 200 (phaseTick 5): Pipeline empty!
+      dut.io.phaseTick #= true
+      sleep(1) // Combinational settling
       assert(dut.io.sampleOut.valid.toBoolean == false)
+      dut.clockDomain.waitSampling()
 
       println("10-bit Pipelined Throughput verified successfully.")
     }

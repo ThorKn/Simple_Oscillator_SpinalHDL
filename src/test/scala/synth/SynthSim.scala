@@ -99,6 +99,10 @@ class SynthSim extends AnyFunSuite {
         waitUntil(dut.io.i2sLrclk.toBoolean == true)
         waitUntil(dut.io.i2sLrclk.toBoolean == false)
 
+        // Skip Slot 0 (the LSB of the previous Right sample)
+        waitUntil(dut.io.i2sBclk.toBoolean == true)
+        waitUntil(dut.io.i2sBclk.toBoolean == false)
+
         while (framesCaptured < maxFrames) {
           var leftRaw = 0
           var rightRaw = 0
@@ -123,9 +127,6 @@ class SynthSim extends AnyFunSuite {
 
           capturedSamples = capturedSamples :+ (leftSample, rightSample)
           framesCaptured += 1
-          
-          // Wait for start of next Left frame edge
-          waitUntil(dut.io.i2sLrclk.toBoolean == false)
         }
       }
 

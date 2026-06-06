@@ -61,11 +61,12 @@ class Synth extends Component {
     oscillator.io.phaseTick        := timingGen.io.phaseTick
     envGen.io.phaseTick            := timingGen.io.phaseTick
     envGen.io.syncIn               := False
-    // svf.io.phaseTick               := timingGen.io.phaseTick
-
-    val alignedSampleTick          = Delay(timingGen.io.sampleTick, cycleCount = 2)
-    decimator.io.sampleTick        := alignedSampleTick
-    svf.io.phaseTick               := alignedSampleTick
+    svf.io.phaseTick               := timingGen.io.phaseTick
+    // Connect phaseTick to attenuators for valid alignment
+    envAttenuator.io.phaseTick     := timingGen.io.phaseTick
+    attenuator.io.phaseTick        := timingGen.io.phaseTick
+    
+    decimator.io.sampleTick        := timingGen.io.sampleTick
 
     // 2. Control Signals (UART Subsystem -> Synth Engine)
     oscillator.io.config           := uart.io.config
