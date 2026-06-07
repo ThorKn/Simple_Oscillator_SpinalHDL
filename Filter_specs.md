@@ -179,6 +179,8 @@ The state registers `lp` and `bp` remain 24 bits wide throughout operation.
 
 responses.
 
+It is also responsible for downsizing the internal 24-bit representation back to the 16-bit output. To prevent harsh wrap-around distortion when filter outputs exceed 16-bit signed boundaries (due to filter peaking or phase-shift overshoot), the module shall apply a saturating clamp to output values, limiting output samples strictly to `[-32768, 32767]`.
+
 ---
 
 ### Parameter Mapper

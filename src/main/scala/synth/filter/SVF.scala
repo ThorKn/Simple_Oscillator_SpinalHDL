@@ -41,7 +41,7 @@ class SVF extends Component {
     outReg := mux.io.sampleOut
   }
 
-  // Drive output flow. Gated to 0 when disabled.
+  // Drive output flow. Payload is gated to 0 and valid keeps running when filter is not enabled.
   io.sampleOut.payload := io.config.enable ? outReg | SInt(16 bits).getZero
   // The output valid pulse is synchronized back to the next phaseTick boundary
   io.sampleOut.valid   := io.phaseTick && !ClockDomain.current.isResetActive

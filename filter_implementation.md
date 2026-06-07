@@ -113,7 +113,7 @@ When `clear` is asserted, FSM resets to `IDLE` and internal state registers (`lp
 # 4. FilterMux
 
 ### Purpose
-The `FilterMux` selects the appropriate response based on the filter mode and scales/resizes the internal 24-bit representation back to the 16-bit output.
+The `FilterMux` selects the appropriate response based on the filter mode and scales/resizes the internal 24-bit representation back to the 16-bit output using saturating logic.
 
 ### IO Bundle
 ```scala
@@ -127,6 +127,17 @@ class FilterMux extends Component {
   }
 }
 ```
+
+### Downsizing with Saturation Clamping
+Rather than using simple MSB truncation (which leads to severe wrap-around noise when the internal state variables exceed 16-bit limits), `FilterMux` implements a saturating clamp to bound the output values within the signed 16-bit range:
+
+$$\text{sampleOut} = \begin{cases} 
+32767 & \text{if } \text{selected} > 32767 \\ 
+-32768 & \text{if } \text{selected} < -32768 \\ 
+\text{selected.resize(16 bits)} & \text{otherwise} 
+\end{cases}$$
+
+This preserves the internal 8-bit headroom in the 24-bit FSM registers (`lpReg`, `bpReg`) to keep the filter loop stable, while ensuring output signal peaks clip cleanly (similar to analog saturation) rather than wrapping around.
 
 ---
 

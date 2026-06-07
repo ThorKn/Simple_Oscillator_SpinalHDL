@@ -21,6 +21,12 @@ class FilterMux extends Component {
     default { selected := io.lp }
   }
 
-  // Downsize 24-bit internal signal back to 16-bit output
-  io.sampleOut := selected.resize(16 bits)
+  // Downsize 24-bit internal signal back to 16-bit output with saturation clamping
+  when(selected > 32767) {
+    io.sampleOut := 32767
+  } elsewhen(selected < -32768) {
+    io.sampleOut := -32768
+  } otherwise {
+    io.sampleOut := selected.resize(16 bits)
+  }
 }

@@ -181,6 +181,56 @@ class SVFSim extends AnyFunSuite {
       // Assert that low frequency signal is significantly more attenuated than the high frequency signal
       assert(Math.abs(hpOutputHighFreq) > Math.abs(hpOutputLowFreq) * 5, "Highpass response failed to block low frequencies")
 
+      println("Filter Frequency Response Behavior verified successfully.")
+
+    }
+  }
+
+  test("SVF integration test - saturation overshoot") {
+    SimConfig.withWave.compile(new SVF).doSim { dut =>
+      dut.clockDomain.forkStimulus(period = 10)
+
+      dut.io.phaseTick #= false
+      dut.io.config.enable #= true
+      dut.io.config.mode #= 0 // LP mode
+      dut.io.config.cutoff #= 128
+      dut.io.config.resonance #= 0
+      dut.io.sampleIn.valid #= false
+      dut.io.sampleIn.payload #= 0
+
+      // Wait for reset to complete
+      dut.clockDomain.waitSampling(25)
+
+      // Helper function to process one sample through the filter and return the output payload
+      def filterSample(sampleVal: Int): Int = {
+        dut.io.phaseTick #= true
+        dut.io.sampleIn.valid #= true
+        dut.io.sampleIn.payload #= sampleVal
+        dut.clockDomain.waitSampling()
+        dut.io.phaseTick #= false
+        dut.io.sampleIn.valid #= false
+        
+        // Wait 49 cycles for the output sample to become valid (at next phaseTick boundary)
+        for (i <- 1 to 49) {
+          if (i == 49) {
+            dut.io.phaseTick #= true
+          }
+          dut.clockDomain.waitSampling()
+        }
+        dut.io.sampleOut.payload.toInt
+      }
+
+      // Feed a large full-scale step input that is known to produce peaking/overshoot.
+      // E.g., repeatedly feed +32767.
+      // Without saturation, this would eventually wrap around and produce a negative output.
+      // With saturation, it should saturate and stay clamped at 32767.
+      var outputVal = 0
+      for (i <- 0 until 50) {
+        outputVal = filterSample(32767)
+        // Verify output is positive and never wraps to a large negative number
+        assert(outputVal >= 0, s"Output wrapped around to negative: $outputVal at sample $i")
+      }
+      assert(outputVal == 32767, s"Output did not saturate at 32767: got $outputVal")
     }
   }
 }

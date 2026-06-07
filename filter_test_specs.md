@@ -57,8 +57,8 @@ Verifies output response selection and fixed-point formatting.
   * **Mode Selection Muxing**:
     * Force distinct test values on `lp`, `bp`, and `hp` ports.
     * Sweep `mode` through `00` (LP), `01` (BP), and `10` (HP), and verify the output payload matches the selected port scaled down to 16 bits.
-  * **Rounding / Truncation**:
-    * Drive known internal values and verify that the 24-to-16 bit conversion performs proper resizing.
+  * **Saturating Resize**:
+    * Drive known internal values that exceed the signed 16-bit range (e.g. `0x123456` or `-0x154321`) and verify that the output saturates correctly to `32767` or `-32768` instead of performing MSB truncation.
 
 ---
 
@@ -71,6 +71,9 @@ Verifies the full pipeline assembly, register control path, next-`phaseTick` flo
   * **Integration Reset Behavior**:
     * Assert that during active startup reset, `sampleOut.valid` is False and `sampleOut.payload` is 0.
     * Assert that outputs remain quiet after reset release before ticks start.
+  * **Saturation under Overshoot**:
+    * Feed a full-scale step input (`+32767`) continuously to the lowpass filter mode.
+    * Verify that the filter output peaks and stabilizes at `32767` and does not wrap around to a negative number at any point.
   * **Next-phaseTick Output Flow Synchronization (Critical)**:
     * Apply `sampleIn.valid` (representing the incoming sample tick).
     * Wait for the FSM to finish calculation.

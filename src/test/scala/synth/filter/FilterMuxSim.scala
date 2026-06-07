@@ -28,22 +28,22 @@ class FilterMuxSim extends AnyFunSuite {
       dut.io.hp #= hpVal
       dut.clockDomain.waitSampling()
 
-      // Test Mode 00: Lowpass (expect lower 16 bits of lpVal, correctly signed)
+      // Test Mode 00: Lowpass (expect saturation at positive max)
       dut.io.mode #= 0
       dut.clockDomain.waitSampling()
-      val expectedLp = (lpVal & 0xFFFF).toShort.toInt
+      val expectedLp = 32767
       assert(dut.io.sampleOut.toInt == expectedLp, s"LP mode failed: got ${dut.io.sampleOut.toInt}, expected $expectedLp")
 
-      // Test Mode 01: Bandpass
+      // Test Mode 01: Bandpass (expect saturation at negative max)
       dut.io.mode #= 1
       dut.clockDomain.waitSampling()
-      val expectedBp = (bpVal & 0xFFFF).toShort.toInt
+      val expectedBp = -32768
       assert(dut.io.sampleOut.toInt == expectedBp, s"BP mode failed: got ${dut.io.sampleOut.toInt}, expected $expectedBp")
 
-      // Test Mode 10: Highpass
+      // Test Mode 10: Highpass (expect saturation at positive max)
       dut.io.mode #= 2
       dut.clockDomain.waitSampling()
-      val expectedHp = (hpVal & 0xFFFF).toShort.toInt
+      val expectedHp = 32767
       assert(dut.io.sampleOut.toInt == expectedHp, s"HP mode failed: got ${dut.io.sampleOut.toInt}, expected $expectedHp")
     }
   }
