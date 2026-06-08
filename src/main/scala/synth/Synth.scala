@@ -26,7 +26,6 @@ class Synth extends Component {
   }
 
   // Map the external clk and reset pins to the internal ClockDomain logic.
-  // This allows the submodules to use standard SpinalHDL registers.
   val coreClockDomain = ClockDomain(
     clock = io.clk24MHz,
     reset = io.reset,

@@ -85,10 +85,10 @@ pre {
     page-break-inside: avoid;
 }
 
-/* Avoid breaking tables across pages */
+/* Avoid breaking tables across pages 
 table {
     page-break-inside: avoid;
-}
+} */
 
 .page-break {
     page-break-before: always;

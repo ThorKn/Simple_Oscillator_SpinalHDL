@@ -12,9 +12,13 @@
    - 1.7 Envelope Control Unit Test (`EnvelopeCtrlSim`)
    - 1.8 Envelope Phase Accumulator Unit Test (`EnvelopeAccumulatorSim`)
    - 1.9 Envelope Waveshaper Unit Test (`EnvelopeShaperSim`)
+   - 1.10 ParameterMapper Unit Test (`ParameterMapperSim`)
+   - 1.11 FilterCore Unit Test (`FilterCoreSim`)
+   - 1.12 FilterMux Unit Test (`FilterMuxSim`)
 2. Integration Tests
    - 2.1 Complete System Integration Test (`SynthSim`)
    - 2.2 Complete Envelope Generator Integration Test (`EnvelopeGeneratorSim`)
+   - 2.3 State Variable Filter Integration Test (`SVFSim`)
 3. Appendix: SpinalSim Best Practices for Reset Verification
    - A.1 The Verilator Combinational Loop Problem (FSM Gating)
    - A.2 Thread-Safe Reset Verification via `forkStimulus` Startup
@@ -448,9 +452,120 @@ Verifies the 257-entry LUT curves, shift-add combinational linear interpolation,
 
 ---
 
-#  2. Integration Tests
+---
+
+##  1.10 ParameterMapper Unit Test (`ParameterMapperSim`)
+
+###  Purpose
+Verifies the lookup ROM generation and correctness of exponential and quadratic coefficient mappings.
+
+###  Simulated Environment
+* **Component Under Test**: `ParameterMapper`
+* **Clock Domain**: None (Combinational Verification).
+
+###  Input Stimulus & Signals
+* `io.cutoff`: `UInt` (8 bits)
+* `io.resonance`: `UInt` (8 bits)
+* `io.cutoffCoeff`: `UInt` (12 bits)
+* `io.resonanceCoeff`: `UInt` (8 bits)
+
+### Test Cases
+
+#### 1.10.1 Exponential Cutoff Mapping
+* **Action**: Sweep `io.cutoff` angle input.
+* **Assertion**: 
+  - Verify index `0` maps to minimum coeff `10`.
+  - Verify index `255` maps to maximum coeff `4095`.
+  - Verify monotonic growth across intermediate values (e.g. `64`, `128`, `192`) and compliance with the mapping equation.
+
+#### 1.10.2 Quadratic Resonance Mapping
+* **Action**: Sweep `io.resonance` feedback input.
+* **Assertion**:
+  - Verify index `0` maps to maximum coefficient `255` (representing minimum resonance/maximum damping).
+  - Verify index `255` maps to minimum coefficient `4` (representing maximum resonance/minimum damping).
+  - Verify quadratic decay across intermediate values (e.g. `64`, `128`, `192`).
 
 ---
+
+##  1.11 FilterCore Unit Test (`FilterCoreSim`)
+
+###  Purpose
+Verifies the time-multiplexed arithmetic FSM sequencing, shared operator scheduling, 24-bit width accumulation, and register clearing.
+
+###  Simulated Environment
+* **Component Under Test**: `FilterCore`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+###  Input Stimulus & Signals
+* `io.phaseTick`: `Bool`
+* `io.clear`: `Bool`
+* `io.sampleIn`: `SInt` (16 bits)
+* `io.cutoffCoeff`: `UInt` (12 bits)
+* `io.resonanceCoeff`: `UInt` (8 bits)
+* `io.lp`: `SInt` (24 bits)
+* `io.bp`: `SInt` (24 bits)
+* `io.hp`: `SInt` (24 bits)
+* `io.done`: `Bool`
+
+### Test Cases
+
+#### 1.11.1 ClockDomain Reset Behavior
+* **Action**: Assert active-high `reset` during simulation.
+* **Assertion**: Verify that all state outputs (`lp`, `bp`, `hp`) are held at `0` and `done` is `False`. Verify the FSM recovers cleanly and stays in `IDLE` after reset release until the next `phaseTick`.
+
+#### 1.11.2 State Reset (Clear)
+* **Action**: Assert `io.clear` high.
+* **Assertion**: Verify that internal state registers (`lp` and `bp`) are immediately set to `0` and the FSM remains in `IDLE`.
+
+#### 1.11.3 FSM Sequencing & Timing
+* **Action**: Assert `io.phaseTick` high for 1 cycle.
+* **Assertion**: Verify that the `done` signal pulses High exactly 8 cycles after `phaseTick` (transitioning through the 8 execution states and back to `IDLE`).
+
+#### 1.11.4 Arithmetic Execution (Normal Vectors)
+* **Action**: Drive `io.sampleIn = 4000`, `cutoffCoeff = 2048`, and `resonanceCoeff = 128`. Trigger calculation.
+* **Assertion**: Verify intermediate values and final states match expected hand-calculated values (LP = `1000`, BP = `2000`, HP = `4000`).
+
+#### 1.11.5 Extreme Values and Overflow/Wrap-Around
+* **Action**: Drive `io.sampleIn = 32767` and force `lpReg` to `-8388608` with zero coefficients.
+* **Assertion**: Confirm that the addition `sampleIn - lp` = `8421375` wraps around predictably to `-8355841` within the signed 24-bit bounds.
+
+#### 1.11.6 Negative Limit Multiplier Stability
+* **Action**: Drive `bpReg = -8388608` and `resonanceCoeff = 255`.
+* **Assertion**: Verify that the resonant term shift-extension does not corrupt the sign bit, asserting `hp` converges correctly.
+
+---
+
+##  1.12 FilterMux Unit Test (`FilterMuxSim`)
+
+###  Purpose
+Verifies output response selection, resizing, and saturating clamp behavior of the filter multiplexer.
+
+###  Simulated Environment
+* **Component Under Test**: `FilterMux`
+* **Clock Domain**: None (Combinational Verification).
+
+###  Input Stimulus & Signals
+* `io.mode`: `UInt` (2 bits)
+* `io.lp`: `SInt` (24 bits)
+* `io.bp`: `SInt` (24 bits)
+* `io.hp`: `SInt` (24 bits)
+* `io.sampleOut`: `SInt` (16 bits)
+
+### Test Cases
+
+#### 1.12.1 Mode Selection Muxing
+* **Action**: Drive LP, BP, HP inputs with in-range values and sweep `io.mode` through `00`, `01`, and `10`.
+* **Assertion**: Verify the output matches the selected input resized to 16 bits.
+
+#### 1.12.2 Saturating Resize
+* **Action**: Drive inputs exceeding 16-bit signed boundaries (e.g. `0x123456` or `-0x154321`).
+* **Assertion**: Verify that values above `32767` saturate to `32767` and values below `-32768` saturate to `-32768` instead of performing wrap-around truncation.
+
+---
+
+#  2. Integration Tests
+
 
 This chapter contains the specifications for verifying multi-module and full-system interactive integration behavior.
 
@@ -565,13 +680,52 @@ Verifies the integration of the three submodules, validating the complete 3-cycl
 
 ---
 
+##  2.3 State Variable Filter Integration Test (`SVFSim`)
+
+###  Purpose
+Verifies the top-level filter coordination, including reset state, flow synchronization on the next-`phaseTick` boundary, enable/disable gating, filtering curves, and saturation overshoot.
+
+###  Simulated Environment
+* **Component Under Test**: `SVF`
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+###  Input Stimulus & Signals
+* `io.phaseTick`: `Bool`
+* `io.config`: `FilterConfig`
+* `io.sampleIn`: `Flow[SInt]` (16 bits)
+* `io.sampleOut`: `Flow[SInt]` (16 bits)
+
+### Test Cases
+
+#### 2.3.1 Integration Reset Behavior
+* **Action**: Assert reset for 10 master clock cycles.
+* **Assertion**: Verify `sampleOut.valid` is `False` and `sampleOut.payload` is `0` during reset and remains quiet after reset deassertion.
+
+#### 2.3.2 Next-phaseTick Output Flow Synchronization
+* **Action**: Present an input sample on `sampleIn` synchronized to `phaseTick`.
+* **Assertion**: Verify that the output `sampleOut.valid` asserts exactly at the next `phaseTick` boundary (exactly 50 cycles later), confirming 1-sample latency.
+
+#### 2.3.3 Enable / Disable Behavior
+* **Action**: Deassert `enable`.
+* **Assertion**: Verify that `sampleOut.payload` is driven to `0` immediately, internal states are cleared, and `sampleOut.valid` continues to pulse in sync with `phaseTick`.
+
+#### 2.3.4 Filter Frequency Response
+* **Action**: Sweep input signal frequency and configure modes.
+* **Assertion**:
+  - **Lowpass**: Assert high-frequency toggle (Nyquist) is attenuated by at least 5x compared to DC step.
+  - **Highpass**: Assert DC step is blocked (output `0`) and high-frequency passes.
+  - **Bandpass**: Assert frequency sweep peaks at the configured cutoff frequency.
+
+#### 2.3.5 Saturation under Overshoot
+* **Action**: Feed a full-scale step input (`+32767`) continuously to the lowpass filter.
+* **Assertion**: Verify the output stabilizes at `32767` and does not wrap around to negative numbers, proving saturating logic prevents wrap-around distortion.
+
+---
+
 #  Appendix: SpinalSim Best Practices for Reset Verification
 
----
-
 This appendix documents the architectural and simulation best practices for implementing and verifying reset stability across all `spinalSynth` modules. It serves as a mandatory guideline for pair-programming, design patterns, and testbench implementations to prevent simulator hangs and race conditions.
-
----
 
 ##  A.1 The Verilator Combinational Loop Problem (FSM Gating)
 
@@ -618,8 +772,6 @@ io.resetAccum := fsmResetAccum && !ClockDomain.current.isResetActive
 ```
 This guarantees that outputs remain strictly quiet during reset without introducing feedback loops into Verilator's next-state logic solver.
 
----
-
 ##  A.2 Thread-Safe Reset Verification via `forkStimulus` Startup
 
 > [!NOTE]
@@ -656,8 +808,6 @@ test("Module unit test - reset & transitions") {
   }
 }
 ```
-
----
 
 ##  A.3 State Transition Synchronization (Delta-Cycle Waiting)
 
