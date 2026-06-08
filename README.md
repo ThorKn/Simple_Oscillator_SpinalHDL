@@ -12,11 +12,17 @@
 8. Waveform Generators
 9. Envelope Generator Architecture
 10. Attenuation & Volume Control
-11. Oversampling and Decimation
-12. Audio Sample Format
-13. I²S Output Interface
-14. Numeric Formats
-15. Confirmed System Parameters
+11. Filter Architecture (SVF)
+12. Oversampling and Decimation
+13. Audio Sample Format
+14. I²S Output Interface
+15. Numeric Formats
+16. System Parameters
+
+Appendices
+- Appendix A: Notes and Oscillator Frequency Words Reference
+- Appendix B: ADSR Time Durations and Phase Increments
+- Appendix C: Register Map
 
 ## Additional documents for spinalSynth:
 
@@ -29,30 +35,26 @@
 
 # 1. Introduction
 
-This project implements a compact digital audio synthsizer in SpinalHDL.
+This project implements a compact digital audio synthesizer in SpinalHDL.
 
-The oscillator is based on Direct Digital Synthesis (DDS) using a phase accumulator architecture. The oscillator generates audio waveforms internally using an oversampled DDS engine and outputs stereo audio using the I²S protocol.
+The core design integrates an oversampled Direct Digital Synthesis (DDS) oscillator, a flexible ADSR envelope generator, a multi-mode State Variable Filter (SVF), and a volume attenuator — all configurable at runtime over a UART register interface. The system produces 16-bit stereo audio serialized using the I²S protocol.
 
 The project is intentionally designed to remain:
 
 - compact
 - deterministic
-- FPGA-friendly
+- FPGA- and ASIC-friendly
 - easy to understand
 - easy to simulate
 - easy to extend later
 
 ## Features
 
-- 24-bit DDS phase accumulator
-- 480 kHz internal DDS update rate
-- 48 kHz stereo audio output
-- 16-bit signed audio samples
-- Stereo I²S output interface
-- Oversampled waveform generation
-- Single synchronous 24 MHz clock domain
-- Clock-enable based timing architecture
-- FPGA-friendly implementation
+- **24-bit DDS Oscillator**: Generates Saw, Square, PWM, Triangle, and Noise waveforms with 10× oversampling (480 kHz internal update rate downsampled to 48 kHz).
+- **Flexible ADSR Envelope**: Supports dynamic rate mapping, four wave-shaping lookup curves (Linear, Exponential, Logarithmic, S-Curve), looping LFO mode, and hardware/software hard-sync prioritization.
+- **State Variable Filter (SVF)**: Multi-mode Chamberlin filter (LP, BP, HP) with exponential cutoff and quadratic resonance mapping, state saturation protection, and cycle-accurate processing frame synchronization.
+- **Control Subsystem**: UART command decoder supporting 3-byte command packets (`WriteRegister`) for dynamic runtime configuration of all parameters.
+- **Timing & Output**: Single synchronous 24 MHz clock domain using clock-enable based timing generators and serialized stereo 16-bit signed I²S audio output.
 
 ## AI: ChatGPT and Gemini
 
@@ -91,6 +93,12 @@ External Interface (24MHz Clk, Reset, UART Rx)
 │  [attenuator] (8-bit Master Volume)           │
 └───────────────┬───────────────────────────────┘
                 │ (480 kHz Attenuated Samples)
+                ↓
+┌───────────────────────────────────────────────┐
+│  State Variable Filter (synth.filter)         │
+│  [SVF]                                        │
+└───────────────┬───────────────────────────────┘
+                │ (480 kHz Filtered Samples)
                 ↓
 ┌───────────────────────────────────────────────┐
 │  Oversampling Decimation                      │
@@ -140,6 +148,12 @@ Synth
  │ 
  ├── mixing/ (Audio Processing)
  │     └── Attenuator (Volume Control)
+ │
+ ├── filter/ (State Variable Filter)
+ │     └── SVF (Top level wrapper)
+ │           ├── ParameterMapper
+ │           ├── FilterCore (Arithmetic FSM)
+ │           └── FilterMux (Output selector & saturator)
  │
  └── output/ (Output Pipeline)
        ├── Decimator
@@ -222,20 +236,8 @@ Right now there is only one command.
 
 ## Register Map
 
-| Address | Register Name | Description | Width |
-|---|---|---|---|
-| `0x00` | `FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
-| `0x01` | `FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
-| `0x02` | `FREQ_HIGH` | Frequency Word Bits [23:16] | 8 bit |
-| `0x03` | `WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
-| `0x04` | `PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
-| `0x05` | `VOLUME` | Master output volume (Reserved) | 8 bit |
-| `0x40` | `ENV_CTRL` | Envelope Control: [0] Enable, [1] Hard Sync Enable, [2] Loop, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
-| `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
-| `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
-| `0x43` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
-| `0x44` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
-| `0x45` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
+> [!NOTE]
+> For the complete list of control registers and memory address offsets mapped into the `spinalSynth` control bus, please refer to [Appendix C: Register Map](#appendix-c-register-map).
 
 ---
 
@@ -662,16 +664,264 @@ Since the accumulator physically halts at `sustainLevel` during Sustain and coun
 Volume level control is performed at the oversampled 480 kHz rate prior to decimation by the `Attenuator` module. To maximize reusable modularity (e.g., interfacing with an 8-bit manual volume register or a 10-bit dynamic envelope generator output), the `Attenuator` is designed as a compile-time parameterized component:
 
 * **Compile-Time Parameter:** `volumeWidth: Int = 8`
-* **Volume Input Port:** `io.volume: UInt(volumeWidth bits)`
+* **Inputs:** `io.volume: UInt(volumeWidth bits)`, `io.phaseTick: Bool` (480 kHz grid strobe)
 * **Mathematical Operation:** 
   ```text
   scaledSample = (sampleIn * volumeSigned) >> volumeWidth
   ```
-  This is implemented efficiently in hardware using a single signed multiplier and bitwise shift scaling, leaving the original sample rate and 16-bit audio resolution unaltered.
+  This is implemented efficiently in hardware using a single signed multiplier and bitwise shift scaling. To align the output flow properly with downstream blocks, the `sampleOut.valid` strobe is synchronized combinationally to the next `phaseTick` edge, introducing exactly 1 sample (1 `phaseTick` period) of latency.
 
 ---
 
-# 11. Oversampling and Decimation
+# 11. Filter Architecture (SVF)
+
+The Filter Module processes audio samples within the spinalSynth signal path.
+
+The module architecture shall allow future filter core implementations without changing the external interface.
+
+---
+
+## 11.1 Architecture
+
+```text id="a1k9qv"
+                     +----------------+
+sampleIn ----------> |                |
+phaseTick ---------> |      SVF       | ---------> sampleOut
+enable ------------> |                |
+mode --------------> |                |
+cutoff ------------> |                |
+resonance ---------> |                |
+                     +----------------+
+                              |
+          +-------------------+-------------------+
+          |                   |                   |
+          v                   v                   v
+
+ +----------------+   +--------------+   +-------------+
+ | ParameterMapper|   |  FilterCore  |   |  FilterMux  |
+ +----------------+   +--------------+   +-------------+
+ | cutoff         |-->| cutoffCoeff  |-->| mode        |
+ | resonance      |-->| resonanceCoeff|  +-------------+
+ +----------------+   +--------------+
+                              |
+                        +-----+-----+
+                        |     |     |
+                        |     |     +---- LP
+                        |     +---------- BP
+                        +---------------- HP
+```
+
+---
+
+## 11.2 Timing
+
+### Main system clock
+
+| Signal | Frequency |
+| ------ | --------- |
+| clk    | 24 MHz    |
+
+### External: Sample Interface Sync
+
+The Filter Module receives and transmits audio samples at a rate of 480 kHz. Input and output samples are transferred using SpinalHDL `Flow` interfaces. A dedicated input signal `phaseTick` is provided.
+
+| Signal    | Rate    |
+| --------- | ------- |
+| phaseTick | 480 kHz |
+
+The input and output Flow interfaces are synchronized to `phaseTick`. All signals remain synchronous to the 24 MHz main system clock.
+
+### Internal: Processing frame
+
+One frame of the external sample sync is 50 main clock cycles long. Calculations can be distributed across multiple system clock cycles during this. Internal processing is not required to use a fully parallel or serial datapath; mixed design is allowed.
+
+---
+
+## 11.3 Modules
+
+### 11.3.1 SVF (Top level wrapper)
+
+`SVF` combines `FilterCore`, `FilterMux`, and `ParameterMapper`, and handles the connection of all input and output signals.
+
+### 11.3.2 Filter Core
+
+`FilterCore` is a Chamberlin State Variable Filter (SVF). It supports runtime adjustment of:
+
+* Cutoff
+* Resonance
+
+and it provides these outputs simultaneously:
+
+* Lowpass (`lp`)
+* Bandpass (`bp`)
+* Highpass (`hp`)
+
+The name SVF (State Variable) refers to two of these passes being internal state variables:
+
+* Lowpass state (`lp`)
+* Bandpass state (`bp`)
+
+#### Calculation
+
+For each input sample, the Highpass (`hp`), Bandpass (`bp`) and Lowpass (`lp`) outputs are calculated from the current filter states, and then the states are updated.
+
+Basic equations:
+
+```text id="g7m2xa"
+hp = input - lp - resonance * bp
+bp = bp + cutoff * hp
+lp = lp + cutoff * bp
+```
+
+Per sample, the filter requires:
+
+* 3 multiplications
+* 4 add/sub operations
+
+The algorithm operates entirely on fixed-point values and uses only:
+
+* Registers
+* Adders/Subtractors
+* Multipliers
+
+Multiplier results use extended precision internally. After each multiplication, the result shall be rescaled (downshifted) to the internal state width before being used in subsequent calculations or written back into a state register.
+
+The internal state width remains constant throughout the filter pipeline and shall not grow between processing stages.
+
+#### Example Width Propagation
+
+```text id="r9k2mp"
+bp(24) * resonance(8)
+    -> 32 bit product
+    -> downshift by 8
+    -> 24 bit result
+
+input(16)
+    -> sign extend
+    -> 24 bits
+
+input(24) - lp(24)
+    -> 25 bit result
+
+(input - lp)(25) - resBp(24)
+    -> 26 bit result
+
+resize
+    -> hp(24)
+
+hp(24) * cutoff(12)
+    -> 36 bit product
+    -> downshift by 12
+    -> 24 bit result
+
+bp(24) + scaledProduct(24)
+    -> 25 bit result
+
+resize
+    -> bp(24)
+
+bp(24) * cutoff(12)
+    -> 36 bit product
+    -> downshift by 12
+    -> 24 bit result
+
+lp(24) + scaledProduct(24)
+    -> 25 bit result
+
+resize
+    -> lp(24)
+```
+
+Arithmetic operations may temporarily increase signal widths. Before values are stored into state registers or used as the next state variable, they shall be resized to the defined internal state width.
+
+The state registers `lp` and `bp` remain 24 bits wide throughout operation.
+
+### 11.3.3 Filter Mux
+
+`FilterMux` is responsible for output selection. The initial implementation shall support selection of:
+
+* Lowpass
+* Bandpass
+* Highpass
+
+responses.
+
+It is also responsible for downsizing the internal 24-bit representation back to the 16-bit output. To prevent harsh wrap-around distortion when filter outputs exceed 16-bit signed boundaries (due to filter peaking or phase-shift overshoot), the module shall apply a saturating clamp to output values, limiting output samples strictly to `[-32768, 32767]`.
+
+### 11.3.4 Parameter Mapper
+
+`ParameterMapper` converts user-facing parameters into internal filter coefficients.
+
+#### Cutoff Mapping
+
+* Input: `UInt(8)`
+* Output: `UInt(12)`
+* ROM: `256 x 12`
+* Mapping: exponential (log-like frequency distribution)
+
+#### Resonance Mapping
+
+* Input: `UInt(8)`
+* Output: `UInt(8)`
+* ROM: `256 x 8`
+* Mapping: quadratic response curve
+
+---
+
+## 11.4 Types and Widths
+
+| Item           | Type          |
+| -------------- | ------------- |
+| sampleIn       | SInt(16 bits) |
+| sampleOut      | SInt(16 bits) |
+| lp state       | SInt(24 bits) |
+| bp state       | SInt(24 bits) |
+| hp signal      | SInt(24 bits) |
+| cutoff         | UInt(8 bits)  |
+| resonance      | UInt(8 bits)  |
+| cutoffCoeff    | UInt(12 bits) |
+| resonanceCoeff | UInt(8 bits)  |
+
+---
+
+## 11.5 Control Signals
+
+| Signal | Type         |
+| ------ | ------------ |
+| enable | Bool         |
+| mode   | UInt(2 bits) |
+
+Mode encoding:
+
+| Value | Response |
+| ----- | -------- |
+| 00    | Lowpass  |
+| 01    | Bandpass |
+| 10    | Highpass |
+| 11    | Reserved |
+
+The control signals are inputs to the top-level `SVF` module and distributed internally.
+
+When `enable` is deasserted, the module output shall be zero.
+
+Bypass functionality is handled outside of the filter module.
+
+---
+
+## 11.6 Filter Register Map
+
+The following registers are mapped into the `spinalSynth` bus to control the SVF parameters:
+
+| Register Address (Hex) | Register Name | Bit Width | Description |
+| :--- | :--- | :---: | :--- |
+| `0x50` | `FILTER_ENABLE` | 8 bits | Bit `[0]`: Enable (`0`=disabled, `1`=enabled) |
+| `0x51` | `FILTER_MODE` | 8 bits | Bits `[1:0]`: Response Mode (`00`=LP, `01`=BP, `10`=HP, `11`=Reserved) |
+| `0x52` | `FILTER_CUTOFF` | 8 bits | 8-bit user cutoff value (mapped exponentially) |
+| `0x53` | `FILTER_RESONANCE` | 8 bits | 8-bit user resonance value (mapped quadratically) |
+
+---
+
+# 12. Oversampling and Decimation
 
 ## Oversampling Strategy
 
@@ -713,7 +963,7 @@ if(sampleTick) {
 
 ---
 
-# 12. Audio Sample Format
+# 13. Audio Sample Format
 
 | Parameter | Value |
 |---|---|
@@ -740,7 +990,7 @@ rightSample = sample
 
 ---
 
-# 13. I²S Output Interface
+# 14. I²S Output Interface
 
 The output interface shall use the I²S protocol.
 
@@ -914,7 +1164,7 @@ The exact serializer state machine behavior is not yet specified.
 
 ---
 
-# 14. Numeric Formats
+# 15. Numeric Formats
 
 | Signal | Type |
 |---|---|
@@ -923,6 +1173,9 @@ The exact serializer state machine behavior is not yet specified.
 | pulseWidth | UInt(8 bits) |
 | audioSample | SInt(16 bits) |
 | volume | UInt(volumeWidth bits) | (Defaults to 8 bits in top-level Synth integration)
+| lp state | SInt(24 bits) |
+| bp state | SInt(24 bits) |
+| hp signal | SInt(24 bits) |
 
 The design shall use fixed-point arithmetic throughout.
 
@@ -936,7 +1189,7 @@ The design shall use fixed-point arithmetic throughout.
 
 ---
 
-# 15. Confirmed System Parameters
+# 16. System Parameters
 
 | Parameter | Value |
 |---|---|
@@ -950,6 +1203,143 @@ The design shall use fixed-point arithmetic throughout.
 | I²S bit clock | 1.536 MHz |
 | Oversampling ratio | 10× |
 | Decimation method | Every 10th sample |
+| Filter | State Variable Filter (SVF) |
+| Filter modes | Lowpass, Bandpass, Highpass |
 | Arithmetic | Fixed-point |
 | Waveforms | Saw, Square, PWM, Triangle, Noise |
 | Clocking strategy | Single synchronous clock domain |
+
+
+<div class="page-break"></div>
+
+---
+
+# Appendices
+
+## Appendix A: Notes and Oscillator Frequency Words Reference
+
+This table provides the mapping between musical notes (C0 to C8), their fundamental frequencies, and the corresponding 24-bit `freqWord` values required for the Oscillator DDS engine.
+
+**System Parameters:**
+- Phase Update Rate: 480 kHz
+- Phase Width: 24 bits
+- Tuning: A4 = 440 Hz
+
+| Note | Freq (Hz) | Hex | Dec | | Note | Freq (Hz) | Hex | Dec |
+| :--- | :--- | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
+| **C0** | 16.35 | `0x00023B` | 571 | | **C4** | 261.63 | `0x0023B2` | 9138 |
+| C#0 | 17.32 | `0x00025D` | 605 | | C#4 | 277.18 | `0x0025CD` | 9677 |
+| D0 | 18.35 | `0x000281` | 641 | | D4 | 293.66 | `0x00280D` | 10253 |
+| D#0 | 19.45 | `0x0002A7` | 679 | | D#4 | 311.13 | `0x002A76` | 10870 |
+| E0 | 20.60 | `0x0002D0` | 720 | | E4 | 329.63 | `0x002D05` | 11525 |
+| F0 | 21.83 | `0x0002FB` | 763 | | F4 | 349.23 | `0x002FBA` | 12218 |
+| F#0 | 23.12 | `0x000328` | 808 | | F#4 | 369.99 | `0x00328E` | 12942 |
+| G0 | 24.50 | `0x000358` | 856 | | G4 | 392.00 | `0x00358A` | 13706 |
+| G#0 | 25.96 | `0x00038B` | 907 | | G#4 | 415.30 | `0x0038B4` | 14516 |
+| A0 | 27.50 | `0x0003C1` | 961 | | A4 | 440.00 | `0x003C13` | 15379 |
+| A#0 | 29.14 | `0x0003FA` | 1018 | | A#4 | 466.16 | `0x003FA7` | 16295 |
+| B0 | 30.87 | `0x000436` | 1078 | | B4 | 493.88 | `0x004368` | 17256 |
+| **C1** | 32.70 | `0x000476` | 1142 | | **C5** | 523.25 | `0x004764` | 18276 |
+| C#1 | 34.65 | `0x0004B9` | 1209 | | C#5 | 554.37 | `0x004B99` | 19353 |
+| D1 | 36.71 | `0x000502` | 1282 | | D5 | 587.33 | `0x00501B` | 20507 |
+| D#1 | 38.89 | `0x00054F` | 1359 | | D#5 | 622.25 | `0x0054EC` | 21740 |
+| E1 | 41.20 | `0x0005A1` | 1441 | | E5 | 659.26 | `0x005A0B` | 23051 |
+| F1 | 43.65 | `0x0005F7` | 1527 | | F5 | 698.46 | `0x005F73` | 24435 |
+| F#1 | 46.25 | `0x000652` | 1618 | | F#5 | 739.99 | `0x00651D` | 25885 |
+| G1 | 49.00 | `0x0006B1` | 1713 | | G5 | 783.99 | `0x006B14` | 27412 |
+| G#1 | 51.91 | `0x000717` | 1815 | | G#5 | 830.61 | `0x007168` | 29032 |
+| A1 | 55.00 | `0x000783` | 1923 | | A5 | 880.00 | `0x007827` | 30759 |
+| A#1 | 58.27 | `0x0007F5` | 2037 | | A#5 | 932.33 | `0x007F4E` | 32590 |
+| B1 | 61.74 | `0x00086D` | 2157 | | B5 | 987.77 | `0x0086CF` | 34511 |
+| **C2** | 65.41 | `0x0008ED` | 2285 | | **C6** | 1046.50 | `0x008EC9` | 36553 |
+| C#2 | 69.30 | `0x000973` | 2419 | | C#6 | 1108.73 | `0x009733` | 38707 |
+| D2 | 73.42 | `0x000A03` | 2563 | | D6 | 1174.66 | `0x00A035` | 41013 |
+| D#2 | 77.78 | `0x000A9D` | 2717 | | D#6 | 1244.51 | `0x00A9D8` | 43480 |
+| E2 | 82.41 | `0x000B41` | 2881 | | E6 | 1318.51 | `0x00B416` | 46102 |
+| F2 | 87.31 | `0x000BEE` | 3054 | | F6 | 1396.91 | `0x00BEE7` | 48871 |
+| F#2 | 92.50 | `0x000CA4` | 3236 | | F#6 | 1479.98 | `0x00CA39` | 51769 |
+| G2 | 98.00 | `0x000D63` | 3427 | | G6 | 1567.98 | `0x00D629` | 54825 |
+| G#2 | 103.83 | `0x000E2D` | 3629 | | G#6 | 1661.22 | `0x00E2D1` | 58065 |
+| A2 | 110.00 | `0x000F05` | 3845 | | A6 | 1760.00 | `0x00F04D` | 61517 |
+| A#2 | 116.54 | `0x000FEA` | 4074 | | A#6 | 1864.66 | `0x00FE9D` | 65181 |
+| B2 | 123.47 | `0x0010DA` | 4314 | | B6 | 1975.53 | `0x010D9F` | 69023 |
+| **C3** | 130.81 | `0x0011D9` | 4569 | | **C7** | 2093.00 | `0x011D91` | 73105 |
+| C#3 | 138.59 | `0x0012E6` | 4838 | | C#7 | 2217.46 | `0x012E66` | 77414 |
+| D3 | 146.83 | `0x001407` | 5127 | | D7 | 2349.32 | `0x01406B` | 82027 |
+| D#3 | 155.56 | `0x00153B` | 5435 | | D#7 | 2489.02 | `0x0153B1` | 86961 |
+| E3 | 164.81 | `0x001683` | 5763 | | E7 | 2637.02 | `0x01682B` | 92203 |
+| F3 | 174.61 | `0x0017DD` | 6109 | | F7 | 2793.83 | `0x017DCE` | 97742 |
+| F#3 | 185.00 | `0x001947` | 6471 | | F#7 | 2959.96 | `0x019472` | 103538 |
+| G3 | 196.00 | `0x001AC5` | 6853 | | G7 | 3135.96 | `0x01AC51` | 109649 |
+| G#3 | 207.65 | `0x001C5A` | 7258 | | G#7 | 3322.44 | `0x01C5A1` | 116129 |
+| A3 | 220.00 | `0x001E0A` | 7690 | | A7 | 3520.00 | `0x01E09A` | 123034 |
+| A#3 | 233.08 | `0x001FD3` | 8147 | | A#7 | 3729.31 | `0x01FD3A` | 130362 |
+| B3 | 246.94 | `0x0021B4` | 8628 | | B7 | 3951.07 | `0x021B3F` | 138047 |
+| | | | | | **C8** | 4186.01 | `0x023B23` | 146211 |
+
+<div class="page-break"></div>
+
+## Appendix B: ADSR Time Durations and Phase Increments
+
+Here is the Markdown table mapping the Attack/Decay/Release 8-bit register values (`P`) to the actual segment time durations (`T`), alongside their pre-calculated **22-bit Phase Increment ROM values** in both decimal and hexadecimal formats (clock frequency = 24 MHz, 32-bit accumulator).
+
+| Register Value (`P`) | Time Duration (`T`) | Phase Increment <br> (`inc` - Decimal) | Phase Increment <br> (`inc` - Hex) |
+| :---: | :---: | :---: | :---: |
+| **0** | **0.50 ms**<br>(`0.00050` s) | **357,914** | `0x05761A` <br> (Max speed) |
+| **8** | **0.71 ms**<br>(`0.00071` s) | **253,440** | `0x03DE00` |
+| **16** | **1.00 ms**<br>(`0.00100` s) | **179,462** | `0x02BD06` |
+| **24** | **1.41 ms**<br>(`0.00141` s) | **127,078** | `0x01F066` |
+| **32** | **1.99 ms**<br>(`0.00199` s) | **89,984** | `0x015F80` |
+| **40** | **2.81 ms**<br>(`0.00281` s) | **63,718** | `0x00F8E6` |
+| **48** | **3.97 ms**<br>(`0.00397` s) | **45,119** | `0x00B03F` |
+| **56** | **5.60 ms**<br>(`0.00560` s) | **31,949** | `0x007CCD` |
+| **64** | **7.91 ms**<br>(`0.00791` s) | **22,623** | `0x00585F` |
+| **72** | **11.17 ms**<br>(`0.01117` s) | **16,020** | `0x003E94` |
+| **80** | **15.78 ms**<br>(`0.01578` s) | **11,344** | `0x002C50` |
+| **88** | **22.28 ms**<br>(`0.02228` s) | **8,032** | `0x001F60` |
+| **96** | **31.46 ms**<br>(`0.03146` s) | **5,688** | `0x001638` |
+| **104** | **44.43 ms**<br>(`0.04443` s) | **4,028** | `0x000FBC` |
+| **112** | **62.75 ms**<br>(`0.06275` s) | **2,852** | `0x000B24` |
+| **120** | **88.62 ms**<br>(`0.08862` s) | **2,019** | `0x0007E3` |
+| **128** | **125.15 ms**<br>(`0.12515` s) | **1,430** | `0x000596` |
+| **136** | **176.73 ms**<br>(`0.17673` s) | **1,013** | `0x0003F5` |
+| **144** | **249.59 ms**<br>(`0.24959` s) | **717** | `0x0002CD` |
+| **152** | **352.47 ms**<br>(`0.35247` s) | **508** | `0x0001FC` |
+| **160** | **497.77 ms**<br>(`0.49777` s) | **360** | `0x000168` |
+| **168** | **702.96 ms**<br>(`0.70296` s) | **255** | `0x0000FF` |
+| **176** | **992.73 ms**<br>(`0.99273` s) | **180** | `0x0000B4` |
+| **184** | **1.40 s**<br>(`1.40196` s) | **128** | `0x000080` |
+| **192** | **1.98 s**<br>(`1.97987` s) | **90** | `0x00005A` |
+| **200** | **2.80 s**<br>(`2.79602` s) | **64** | `0x000040` |
+| **208** | **3.95 s**<br>(`3.94859` s) | **45** | `0x00002D` |
+| **216** | **5.58 s**<br>(`5.57629` s) | **32** | `0x000020` |
+| **224** | **7.87 s**<br>(`7.87495` s) | **23** | `0x000017` |
+| **232** | **11.12 s**<br>(`11.12118` s) | **16** | `0x000010` |
+| **240** | **15.71 s**<br>(`15.70556` s) | **11** | `0x00000B` |
+| **248** | **22.18 s**<br>(`22.17973` s) | **8** | `0x000008` |
+| **255** | **30.00 s**<br>(`30.00000` s) | **6** | `0x000006` <br> (Min speed) |
+
+<div class="page-break"></div>
+
+## Appendix C: Register Map
+
+The following registers are mapped into the `spinalSynth` bus to control the synthesizer and filter parameters:
+
+| Address | Register Name | Description | Width |
+|---|---|---|---|
+| `0x00` | `FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
+| `0x01` | `FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
+| `0x02` | `FREQ_HIGH` | Frequency Word Bits [23:16] | 8 bit |
+| `0x03` | `WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
+| `0x04` | `PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
+| `0x05` | `VOLUME` | Master output volume (Reserved) | 8 bit |
+| `0x40` | `ENV_CTRL` | Envelope Control: [0] Enable, [1] Hard Sync Enable, [2] Loop, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
+| `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
+| `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
+| `0x43` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
+| `0x44` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
+| `0x45` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
+| `0x50` | `FILTER_ENABLE` | Filter module enable: [0] Enable | 8 bit |
+| `0x51` | `FILTER_MODE` | Filter response mode: [1:0] Mode (00=LP, 01=BP, 10=HP, 11=Reserved) | 8 bit |
+| `0x52` | `FILTER_CUTOFF` | Cutoff frequency parameter | 8 bit |
+| `0x53` | `FILTER_RESONANCE` | Resonance feedback parameter | 8 bit |

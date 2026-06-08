@@ -42,5 +42,10 @@ object EnvelopeStage {
   val SUSTAIN = 3
   val RELEASE = 4
 }
-
-
+// Unified configuration bundle sent from Register Bank to the SVF filter
+case class FilterConfig() extends Bundle {
+  val enable    = Bool()
+  val mode      = UInt(2 bits)
+  val cutoff    = UInt(8 bits)
+  val resonance = UInt(8 bits)
+}

@@ -76,6 +76,13 @@ class SynthSim extends AnyFunSuite {
       // Sustain = 128 (address 0x43)
       writeRegister(0x43, 0x80)
 
+      // Configure Filter Parameters:
+      // Enable filter (bit 0 = 1) -> value = 1 (address 0x50)
+      writeRegister(0x50, 0x01)
+      writeRegister(0x51, 0x00)
+      writeRegister(0x52, 0x80)
+      writeRegister(0x53, 0x00)
+
       // Configure Frequency Tuning Word (0x080000) atomically to output a 15 kHz tone:
       writeRegister(0x00, 0x00) // FREQ_LOW -> Stages
       writeRegister(0x01, 0x00) // FREQ_MID -> Stages
@@ -91,6 +98,10 @@ class SynthSim extends AnyFunSuite {
         // Align with Left-channel WS boundary (lrclk goes Low)
         waitUntil(dut.io.i2sLrclk.toBoolean == true)
         waitUntil(dut.io.i2sLrclk.toBoolean == false)
+
+        // Skip Slot 0 (the LSB of the previous Right sample)
+        waitUntil(dut.io.i2sBclk.toBoolean == true)
+        waitUntil(dut.io.i2sBclk.toBoolean == false)
 
         while (framesCaptured < maxFrames) {
           var leftRaw = 0
@@ -116,9 +127,6 @@ class SynthSim extends AnyFunSuite {
 
           capturedSamples = capturedSamples :+ (leftSample, rightSample)
           framesCaptured += 1
-          
-          // Wait for start of next Left frame edge
-          waitUntil(dut.io.i2sLrclk.toBoolean == false)
         }
       }
 

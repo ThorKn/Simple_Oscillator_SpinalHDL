@@ -2,7 +2,7 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.{RegisterWrite, OscillatorConfig, EnvelopeConfig}
+import synth.common.{RegisterWrite, OscillatorConfig, EnvelopeConfig, FilterConfig}
 
 class RegisterBank extends Component {
 
@@ -10,6 +10,7 @@ class RegisterBank extends Component {
     val regWrite = slave(Flow(RegisterWrite()))
     val config   = out(OscillatorConfig())
     val envConfig = out(EnvelopeConfig())
+    val filterConfig = out(FilterConfig())
   }
 
   // --------------------------------------------------------------------------
@@ -35,6 +36,12 @@ class RegisterBank extends Component {
   val envSustainReg     = Reg(Bits(8 bits)) init(0)
   val envReleaseReg     = Reg(Bits(8 bits)) init(0)
   val envGateReg        = Reg(Bits(8 bits)) init(0)
+
+  // Filter registers
+  val filterEnableReg   = Reg(Bits(8 bits)) init(0)
+  val filterModeReg     = Reg(Bits(8 bits)) init(0)
+  val filterCutoffReg   = Reg(Bits(8 bits)) init(0)
+  val filterResReg      = Reg(Bits(8 bits)) init(0)
 
   // --------------------------------------------------------------------------
   // Register Write Logic
@@ -105,6 +112,26 @@ class RegisterBank extends Component {
       is(U"8'x45") {
         envGateReg := io.regWrite.payload.data
       }
+
+      // Filter Enable (FILTER_ENABLE)
+      is(U"8'x50") {
+        filterEnableReg := io.regWrite.payload.data
+      }
+
+      // Filter Mode (FILTER_MODE)
+      is(U"8'x51") {
+        filterModeReg := io.regWrite.payload.data
+      }
+
+      // Filter Cutoff (FILTER_CUTOFF)
+      is(U"8'x52") {
+        filterCutoffReg := io.regWrite.payload.data
+      }
+
+      // Filter Resonance (FILTER_RESONANCE)
+      is(U"8'x53") {
+        filterResReg := io.regWrite.payload.data
+      }
     }
   }
 
@@ -139,6 +166,12 @@ class RegisterBank extends Component {
   val syncedEnvRelease     = RegNext(envReleaseReg.asUInt) init(0)
   val syncedEnvGate       = RegNext(envGateReg) init(0)
 
+  // Synced filter registers
+  val syncedFilterEnable   = RegNext(filterEnableReg(0)) init(False)
+  val syncedFilterMode     = RegNext(filterModeReg.asUInt) init(0)
+  val syncedFilterCutoff   = RegNext(filterCutoffReg.asUInt) init(0)
+  val syncedFilterRes      = RegNext(filterResReg.asUInt) init(0)
+
   // --------------------------------------------------------------------------
   // Outputs
   // --------------------------------------------------------------------------
@@ -154,4 +187,9 @@ class RegisterBank extends Component {
   io.envConfig.sustain     := syncedEnvSustain
   io.envConfig.release     := syncedEnvRelease
   io.envConfig.gate        := syncedEnvGate
+
+  io.filterConfig.enable    := syncedFilterEnable
+  io.filterConfig.mode      := syncedFilterMode(1 downto 0)
+  io.filterConfig.cutoff    := syncedFilterCutoff
+  io.filterConfig.resonance := syncedFilterRes
 }
