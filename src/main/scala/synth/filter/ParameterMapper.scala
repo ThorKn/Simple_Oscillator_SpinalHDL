@@ -2,6 +2,7 @@ package synth.filter
 
 import spinal.core._
 import spinal.lib._
+import synth.common.RomData
 
 class ParameterMapper extends Component {
   val io = new Bundle {
@@ -12,20 +13,13 @@ class ParameterMapper extends Component {
   }
 
   // 1. Generate Exponential Cutoff ROM (256 x 12 bits)
-  val cutoffRomData = for (p <- 0 until 256) yield {
-    val coeffVal = Math.round(10.0 * Math.pow(4095.0 / 10.0, p / 255.0)).toInt
-    U(coeffVal, 12 bits)
-  }
-  val cutoffRom = Mem(UInt(12 bits), 256) init(cutoffRomData)
+  val cutoffRom = Mem(UInt(12 bits), 256) init(RomData.filterCutoffLut.map(U(_, 12 bits)))
 
   // 2. Generate Quadratic Resonance ROM (256 x 8 bits)
-  val resonanceRomData = for (r <- 0 until 256) yield {
-    val coeffVal = Math.round(255.0 - 251.0 * Math.pow(r / 255.0, 2.0)).toInt
-    U(coeffVal, 8 bits)
-  }
-  val resonanceRom = Mem(UInt(8 bits), 256) init(resonanceRomData)
+  val resonanceRom = Mem(UInt(8 bits), 256) init(RomData.filterResonanceLut.map(U(_, 8 bits)))
 
   // 3. Combinational Read
   io.cutoffCoeff    := cutoffRom.readAsync(io.cutoff)
   io.resonanceCoeff := resonanceRom.readAsync(io.resonance)
 }
+

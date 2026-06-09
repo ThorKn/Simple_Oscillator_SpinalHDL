@@ -3,6 +3,7 @@ package synth.envelope
 import spinal.core._
 import spinal.core.sim._
 import spinal.lib._
+import synth.common.RomData
 
 class EnvelopeShaper extends Component {
   val io = new Bundle {
@@ -18,42 +19,12 @@ class EnvelopeShaper extends Component {
 
 
   // -------------------------------------------------------------------------
-  // 1. Compile-Time ROM Contents Generation (257 entries each)
+  // 1. ROM Table Instantiations
   // -------------------------------------------------------------------------
-  
-  // 1.1 Linear ROM: y = x (safely clamped to 255 at index 256 for interpolation boundary)
-  val linContent = for (x <- 0 to 256) yield {
-    U(scala.math.min(255, x), 8 bits)
-  }
-
-  // 1.2 Exponential ROM: y = 255 * (exp(3 * x / 255) - 1) / (exp(3) - 1)
-  val expContent = for (x <- 0 to 256) yield {
-    val factor = scala.math.min(255.0, x.toDouble) / 255.0
-    val v = 255.0 * (scala.math.exp(3.0 * factor) - 1.0) / (scala.math.exp(3.0) - 1.0)
-    U(scala.math.round(v).toInt, 8 bits)
-  }
-
-  // 1.3 Logarithmic ROM: y = 255 * log1p(7 * x / 255) / log1p(7)
-  val logContent = for (x <- 0 to 256) yield {
-    val factor = scala.math.min(255.0, x.toDouble) / 255.0
-    val v = 255.0 * scala.math.log1p(7.0 * factor) / scala.math.log1p(7.0)
-    U(scala.math.round(v).toInt, 8 bits)
-  }
-
-  // 1.4 Sigmoid (S-Curve) ROM: y = 255 * (1 - cos(pi * x / 255)) / 2
-  val sigContent = for (x <- 0 to 256) yield {
-    val factor = scala.math.min(255.0, x.toDouble) / 255.0
-    val v = 255.0 * (1.0 - scala.math.cos(scala.math.Pi * factor)) / 2.0
-    U(scala.math.round(v).toInt, 8 bits)
-  }
-
-  // -------------------------------------------------------------------------
-  // 2. ROM Table Instantiations
-  // -------------------------------------------------------------------------
-  val linRom = Mem(UInt(8 bits), 257) init(linContent)
-  val expRom = Mem(UInt(8 bits), 257) init(expContent)
-  val logRom = Mem(UInt(8 bits), 257) init(logContent)
-  val sigRom = Mem(UInt(8 bits), 257) init(sigContent)
+  val linRom = Mem(UInt(8 bits), 257) init(RomData.linearCurveLut.map(U(_, 8 bits)))
+  val expRom = Mem(UInt(8 bits), 257) init(RomData.expCurveLut.map(U(_, 8 bits)))
+  val logRom = Mem(UInt(8 bits), 257) init(RomData.logCurveLut.map(U(_, 8 bits)))
+  val sigRom = Mem(UInt(8 bits), 257) init(RomData.sigCurveLut.map(U(_, 8 bits)))
 
   // -------------------------------------------------------------------------
   // 3. Lookup Address & Boundary Values Selection Mux

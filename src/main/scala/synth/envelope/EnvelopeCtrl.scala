@@ -3,7 +3,7 @@ package synth.envelope
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
-import synth.common.{EnvelopeConfig, EnvelopeStage}
+import synth.common.{EnvelopeConfig, EnvelopeStage, RomData}
 
 class EnvelopeCtrl extends Component {
   val io = new Bundle {
@@ -29,17 +29,7 @@ class EnvelopeCtrl extends Component {
   // -------------------------------------------------------------------------
   // Logarithmic Increment ROM Mapping (256 words x 22 bits)
   // -------------------------------------------------------------------------
-  val clockFreq = 24000000.0   // 24 MHz
-  val tMin      = 0.0005       // 0.5 ms
-  val tMax      = 30.0         // 30.0 s
-
-  // Scala-time generator loop for ROM initialization
-  val lutContent = for (p <- 0 until 256) yield {
-    val t = tMin * scala.math.pow(tMax / tMin, p / 255.0)
-    val inc = scala.math.round(scala.math.pow(2, 32) / (t * clockFreq))
-    U(inc, 22 bits)
-  }
-  val rom = Mem(UInt(22 bits), 256) init(lutContent)
+  val rom = Mem(UInt(22 bits), 256) init(RomData.envelopeRateLut.map(U(_, 22 bits)))
 
   // Select ROM address based on the current active FSM stage
   val romAddr = UInt(8 bits)

@@ -28,7 +28,11 @@
    - 8.6 Signal Flow & Pipeline Timing
 9. Decimator
 10. I2STransmitter
-   - 10.1 Gated Startup and Idle State
+    - 10.1 Gated Startup and Idle State
+11. Common Package
+    - 11.1 Types and Configuration Bundles
+    - 11.2 Centralized Memory Data
+    - 11.3 Integration in Hardware Modules
 
 <div class="page-break"></div>
 
@@ -50,7 +54,8 @@ spinalSynth/
 │   │           ├── Synth.scala             # Top-level System Integration (per Section 2)
 │   │           ├── Main.scala              # Hardware generation entry point (Verilog generator)
 │   │           ├── common/                 # Shared system types and bundles
-│   │           │   └── Types.scala         # Unified hardware types and bundles
+│   │           │   ├── Types.scala         # Unified hardware types and bundles
+│   │           │   └── RomData.scala       # Centralized compiler-time ROM datasets
 │   │           ├── timing/                 # System control and tick generation
 │   │           │   └── TimingGenerator.scala # Tick generation logic (per Section 3)
 │   │           ├── uart/                   # Control Path logic
@@ -995,3 +1000,111 @@ The state machine transitions to `active` upon the first assertion of `io.valid`
 Once active, the transmitter remains in the active state to maintain a continuous bit clock, even 
 if subsequent `valid` pulses are delayed, though it will re-synchronize its frame boundaries 
 to the `valid` signal to prevent drift.
+
+<div class="page-break"></div>
+
+---
+
+# 11. Common Package
+
+The `synth.common` package puts the common goods of the code base into one centralized place. It contains shared types, bundle structures, constants, and pre-calculated ROM lookup arrays. This helps reducing code redundancy and makes the code easier to understand and maintain.
+
+---
+
+## 11.1 Types and Configuration Bundles (`Types.scala`)
+
+The `Types.scala` file defines case classes and bundles used for internal bus transactions, component configuration, and inter-module signal routing.
+
+### 11.1.1 Bus Communication Types
+* **`RegisterWrite`**: Represents a decoded write transaction on the control bus.
+  * `address`: `UInt(8 bits)` — The target register offset.
+  * `data`: `Bits(8 bits)` — The 8-bit parameter payload.
+
+### 11.1.2 Module Configuration Bundles
+To avoid routing cluttered individual control wires throughout the top-level entity, settings from the `RegisterBank` are packaged into unified configuration bundles:
+
+* **`OscillatorConfig`**: Routes parameters from the UART registers to the Oscillator.
+  * `freqWord`: `UInt(24 bits)` — Complete committed DDS frequency increment.
+  * `waveSelect`: `UInt(3 bits)` — Selection index of the active waveform.
+  * `pwmWidth`: `UInt(8 bits)` — Duty cycle for the pulse waveform.
+  * `volume`: `UInt(8 bits)` — Target volume setting (Reserved).
+* **`EnvelopeConfig`**: Routes ADSR settings to the Envelope Generator.
+  * `ctrl`: `Bits(8 bits)` — Bit field controls (`[0]`: Enable, `[1]`: Hard Sync, `[2]`: Loop, `[5:4]`: Curve).
+  * `attack` / `decay` / `sustain` / `release`: `UInt(8 bits)` — Envelope phase coefficients.
+  * `gate`: `Bits(8 bits)` — Bit `[0]`: Gate ON/OFF, Bit `[1]`: Software Hard Sync trigger.
+* **`FilterConfig`**: Routes parameters to the State Variable Filter.
+  * `enable`: `Bool` — Bypass/activation state of the filter core.
+  * `mode`: `UInt(2 bits)` — Band configuration (`00`=LP, `01`=BP, `10`=HP).
+  * `cutoff`: `UInt(8 bits)` — Filter cutoff frequency.
+  * `resonance`: `UInt(8 bits)` — Filter resonance feedback strength.
+
+### 11.1.3 Internal Audio Routing Bundles
+* **`Waveforms`**: Routes individual generated waveforms from `Generators` to the output `Mux` combinational logic:
+  * `saw` / `square` / `pwm` / `tri`: `SInt(16 bits)`.
+
+### 11.1.4 Envelope Generator FSM Constants
+* **`EnvelopeStage`**: An object defining integer constants representing active FSM phases:
+  * `IDLE` = 0, `ATTACK` = 1, `DECAY` = 2, `SUSTAIN` = 3, `RELEASE` = 4.
+
+---
+
+## 11.2 Centralized Memory Data (`RomData.scala`)
+
+The `RomData` object centralizes the mathematical modeling and pre-calculated data for all lookup tables in `spinalSynth`. It generates pure Scala sequences (`Seq[BigInt]`), decoupling DSP calculations from physical hardware bit-widths.
+
+### 11.2.1 Envelope Rate LUT (`envelopeRateLut`)
+Generates 256 logarithmic time-duration-to-phase-increment coefficients mapped between 0.5 ms and 30.0 s at a 24 MHz master clock:
+```text
+t(p) = 0.0005 * (30.0 / 0.0005)^(p / 255)
+envelopeRateLut(p) = round(2^32 / (t(p) * 24_000_000))
+```
+
+### 11.2.2 Envelope Shaper Curve LUTs (257 entries each)
+To support hybrid 8+2 bit interpolation, each curve contains 257 entries, with index 256 acting as the terminal boundary limit to prevent overflow:
+
+* **Linear LUT** (`linearCurveLut`):
+  ```text
+  y(x) = min(255, x)
+  ```
+* **Exponential LUT** (`expCurveLut`):
+  ```text
+  factor = min(255.0, x) / 255.0
+  y(x) = round(255 * (exp(3 * factor) - 1) / (exp(3) - 1))
+  ```
+* **Logarithmic LUT** (`logCurveLut`):
+  ```text
+  factor = min(255.0, x) / 255.0
+  y(x) = round(255 * log1p(7 * factor) / log1p(7))
+  ```
+* **Sigmoid / S-Curve LUT** (`sigCurveLut`):
+  ```text
+  factor = min(255.0, x) / 255.0
+  y(x) = round(255 * (1 - cos(pi * factor)) / 2)
+  ```
+
+### 11.2.3 Filter Coefficient Mapping LUTs (256 entries each)
+* **Exponential Cutoff** (`filterCutoffLut`): Maps user-facing cutoff values (0 to 255) exponentially to 12-bit coefficient steps (10 to 4095):
+  ```text
+  k(p) = round(10 * (4095 / 10)^(p / 255))
+  ```
+* **Quadratic Resonance** (`filterResonanceLut`): Maps resonance values (0 to 255) quadratically to feedback coefficients:
+  ```text
+  q(r) = round(255 - 251 * (r / 255)^2)
+  ```
+
+---
+
+## 11.3 Integration in Hardware Modules
+
+Modules instantiate their own local memories for physical routing, but initialize them using `RomData` sequences mapped to hardware types:
+
+```scala
+// In EnvelopeCtrl: Rate LUT
+val rom = Mem(UInt(22 bits), 256) init(RomData.envelopeRateLut.map(U(_, 22 bits)))
+
+// In EnvelopeShaper: Curve ROMs
+val expRom = Mem(UInt(8 bits), 257) init(RomData.expCurveLut.map(U(_, 8 bits)))
+
+// In ParameterMapper: Cutoff mapping
+val cutoffRom = Mem(UInt(12 bits), 256) init(RomData.filterCutoffLut.map(U(_, 12 bits)))
+```
