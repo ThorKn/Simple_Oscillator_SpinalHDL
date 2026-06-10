@@ -7,7 +7,7 @@
    - 1.2 Register Bank Unit Test (`RegisterBankSim`)
    - 1.3 UART Protocol Decoder Unit Test (`UartProtocolDecoderSim`)
    - 1.4 Timing Generator Unit Test (`TimingSim`)
-   - 1.5 Waveform Generator Unit Test (`WaveformSim`)
+   - 1.5 Waveform Generator Unit Test (`OscGeneratorsSim`)
    - 1.6 I2S Transmitter Unit Test (`I2STransmitterSim`)
    - 1.7 Envelope Control Unit Test (`EnvelopeCtrlSim`)
    - 1.8 Envelope Phase Accumulator Unit Test (`EnvelopeAccumulatorSim`)
@@ -116,30 +116,30 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
 
 ### Input Stimulus & Signals
 * `io.regWrite`: `Flow[RegisterWrite]` (containing 8-bit `address` and 8-bit `data`)
-* `io.config`: `OscillatorConfig` (output bundle containing `freqWord`, `waveSelect`, `pwmWidth`, `volume`)
+* `io.oscConfig`: `OscConfig` (output bundle containing `freqWord`, `waveSelect`, `pwmWidth`, `volume`)
 * `io.envConfig`: `EnvelopeConfig` (output bundle containing `ctrl`, `attack`, `decay`, `sustain`, `release`, `gate`)
 
 ### Test Cases
 
 ####  1.2.1 Reset Defaults
 * **Action**: Start simulation with reset asserted.
-* **Assertion**: Verify that all output configuration fields in both `io.config` and `io.envConfig` are held strictly at `0`.
+* **Assertion**: Verify that all output configuration fields in both `io.oscConfig` and `io.envConfig` are held strictly at `0`.
 
 ####  1.2.2 Single-Byte Direct Updates
 * **Action**: Write individually to non-atomic registers using the `io.regWrite` port:
-  - Write `0x03` (address `0x03` - `WAVE_SEL`)
-  - Write `0xA5` (address `0x04` - `PWM_WIDTH`)
-  - Write `0x7F` (address `0x05` - `VOLUME`)
-* **Assertion**: Verify that the corresponding output fields (`config.waveSelect`, `config.pwmWidth`, and `config.volume`) are updated to the written values on the next clock cycle.
+  - Write `0x03` (address `0x03` - `OSC_WAVE_SEL`)
+  - Write `0xA5` (address `0x04` - `OSC_PWM_WIDTH`)
+  - Write `0x7F` (address `0x05` - `OSC_VOLUME`)
+* **Assertion**: Verify that the corresponding output fields (`oscConfig.waveSelect`, `oscConfig.pwmWidth`, and `oscConfig.volume`) are updated to the written values on the next clock cycle.
 
 ####  1.2.3 Atomic 24-Bit Frequency Commitment
 * **Action**: Perform a sequential write sequence to verify shadow staging and atomic trigger commitment:
-  1. Write `0x55` to `0x00` (`FREQ_LOW`).
-     * *Assertion*: Verify that `config.freqWord` remains unchanged (stages in shadow register).
-  2. Write `0xAA` to `0x01` (`FREQ_MID`).
-     * *Assertion*: Verify that `config.freqWord` remains unchanged (stages in shadow register).
-  3. Write `0x0C` to `0x02` (`FREQ_HIGH`).
-     * *Assertion*: Verify that on the next clock cycle, the active output `config.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
+  - Write `0x55` to `0x00` (`OSC_FREQ_LOW`).
+    * *Assertion*: Verify that `oscConfig.freqWord` remains unchanged (stages in shadow register).
+  - Write `0xAA` to `0x01` (`OSC_FREQ_MID`).
+    * *Assertion*: Verify that `oscConfig.freqWord` remains unchanged (stages in shadow register).
+  - Write `0x0C` to `0x02` (`OSC_FREQ_HIGH`).
+    * *Assertion*: Verify that on the next clock cycle, the active output `oscConfig.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
 
 ####  1.2.4 Envelope Parameter Updates
 * **Action**: Write individually to all six envelope registers using `io.regWrite`:
@@ -156,7 +156,7 @@ Verifies the parameter storage register bank module (`RegisterBank`) for reset d
   1. Write arbitrary values to all oscillator registers (`0x00` through `0x05`).
      * *Assertion*: Verify that all envelope fields in `io.envConfig` remain completely unchanged.
   2. Write arbitrary values to all envelope registers (`0x40` through `0x45`).
-     * *Assertion*: Verify that all oscillator fields in `io.config` remain completely unchanged.
+     * *Assertion*: Verify that all oscillator fields in `io.oscConfig` remain completely unchanged.
 
 ---
 
@@ -231,19 +231,19 @@ Verifies the master clock divider module (`TimingGenerator`) for reset safety, c
 
 ---
 
-##  1.5 Waveform Generator Unit Test (`WaveformSim`)
+##  1.5 Waveform Generator Unit Test (`OscGeneratorsSim`)
 
 ###  Purpose
-Verifies the digital oscillators core module (`Generators`) for mathematical wave formatting precision (Sawtooth, Square, Triangle) and pulse-width comparator thresholds (PWM) across boundary phases.
+Verifies the digital oscillators core module (`OscGenerators`) for mathematical wave formatting precision (Sawtooth, Square, Triangle) and pulse-width comparator thresholds (PWM) across boundary phases.
 
 ###  Simulated Environment
-* **Component Under Test**: `Generators`
+* **Component Under Test**: `OscGenerators`
 * **Clock Domain**: None (Combinational Verification).
 
 ###  Input Stimulus & Signals
 * `io.phase`: `UInt` (24 bits)
 * `io.pwmWidth`: `UInt` (8 bits)
-* `io.waves`: `Waveforms` (output bundle containing `saw`, `square`, `pwm`, `tri`)
+* `io.waves`: `OscWaveforms` (output bundle containing `saw`, `square`, `pwm`, `tri`)
 
 ###  Test Cases
 

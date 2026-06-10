@@ -3,7 +3,7 @@ package synth.oscillator
 import spinal.core._
 import spinal.lib._
 
-class Noise extends Component {
+class OscNoise extends Component {
   val io = new Bundle {
     val phaseTick = in Bool()
     val sample    = out SInt(16 bits)

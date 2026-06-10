@@ -29,10 +29,10 @@ class RegisterBankSim extends AnyFunSuite {
       // Advance simulation time by 50 units (5 cycles) while reset is active
       sleep(50)
       
-      assert(dut.io.config.freqWord.toLong == 0, "Frequency must remain 0 during reset")
-      assert(dut.io.config.waveSelect.toInt == 0, "waveSelect must remain 0 during reset")
-      assert(dut.io.config.pwmWidth.toInt == 0, "pwmWidth must remain 0 during reset")
-      assert(dut.io.config.volume.toInt == 0, "Volume must remain 0 during reset")
+      assert(dut.io.oscConfig.freqWord.toLong == 0, "Frequency must remain 0 during reset")
+      assert(dut.io.oscConfig.waveSelect.toInt == 0, "waveSelect must remain 0 during reset")
+      assert(dut.io.oscConfig.pwmWidth.toInt == 0, "pwmWidth must remain 0 during reset")
+      assert(dut.io.oscConfig.volume.toInt == 0, "Volume must remain 0 during reset")
       
       // Assert Envelope config fields remain strictly 0 under active reset
       assert(dut.io.envConfig.ctrl.toInt == 0, "envConfig.ctrl must remain 0 during reset")
@@ -52,38 +52,38 @@ class RegisterBankSim extends AnyFunSuite {
       // 1.2.2 Verify Single-Byte Direct Updates
       println("Verifying Single-Byte Direct Updates:")
       
-      // Write Waveform Select (0x03) -> 3 (Triangle)
+      // Write Waveform Select (OSC_WAVE_SEL - 0x03) -> 3 (Triangle)
       writeReg(0x03, 3)
-      assert(dut.io.config.waveSelect.toInt == 3, s"Expected waveSelect to be 3, got ${dut.io.config.waveSelect.toInt}")
+      assert(dut.io.oscConfig.waveSelect.toInt == 3, s"Expected waveSelect to be 3, got ${dut.io.oscConfig.waveSelect.toInt}")
 
-      // Write PWM Width (0x04) -> 0xA5
+      // Write PWM Width (OSC_PWM_WIDTH - 0x04) -> 0xA5
       writeReg(0x04, 0xA5)
-      assert(dut.io.config.pwmWidth.toInt == 0xA5, s"Expected pwmWidth to be 0xA5, got ${dut.io.config.pwmWidth.toInt}")
+      assert(dut.io.oscConfig.pwmWidth.toInt == 0xA5, s"Expected pwmWidth to be 0xA5, got ${dut.io.oscConfig.pwmWidth.toInt}")
 
-      // Write Volume (0x05) -> 0x7F
+      // Write Volume (OSC_VOLUME - 0x05) -> 0x7F
       writeReg(0x05, 0x7F)
-      assert(dut.io.config.volume.toInt == 0x7F, s"Expected volume to be 0x7F, got ${dut.io.config.volume.toInt}")
+      assert(dut.io.oscConfig.volume.toInt == 0x7F, s"Expected volume to be 0x7F, got ${dut.io.oscConfig.volume.toInt}")
 
       println("Single-Byte Direct Updates verified successfully.")
 
       // 1.2.3 Verify Atomic 24-Bit Frequency Commitment
       println("Verifying Atomic Frequency Updates:")
 
-      // Step 1: Write Low byte (FREQ_LOW) -> 0x55
+      // Step 1: Write Low byte (OSC_FREQ_LOW) -> 0x55
       writeReg(0x00, 0x55)
       // Active frequency must remain unchanged (0)
-      assert(dut.io.config.freqWord.toLong == 0, s"Expected frequency to remain 0 after FREQ_LOW write, got ${dut.io.config.freqWord.toLong}")
+      assert(dut.io.oscConfig.freqWord.toLong == 0, s"Expected frequency to remain 0 after OSC_FREQ_LOW write, got ${dut.io.oscConfig.freqWord.toLong}")
 
-      // Step 2: Write Mid byte (FREQ_MID) -> 0xAA
+      // Step 2: Write Mid byte (OSC_FREQ_MID) -> 0xAA
       writeReg(0x01, 0xAA)
       // Active frequency must still remain unchanged (0)
-      assert(dut.io.config.freqWord.toLong == 0, s"Expected frequency to remain 0 after FREQ_MID write, got ${dut.io.config.freqWord.toLong}")
+      assert(dut.io.oscConfig.freqWord.toLong == 0, s"Expected frequency to remain 0 after OSC_FREQ_MID write, got ${dut.io.oscConfig.freqWord.toLong}")
 
-      // Step 3: Write High byte (FREQ_HIGH) -> 0x0C (Trigger Commit)
+      // Step 3: Write High byte (OSC_FREQ_HIGH) -> 0x0C (Trigger Commit)
       writeReg(0x02, 0x0C)
       // In the next cycle, the 24-bit frequency word must atomically update to 0x0CAA55 (830037)
       val expectedFreq = 0x0CAA55
-      assert(dut.io.config.freqWord.toLong == expectedFreq, s"Expected atomic update to $expectedFreq, got ${dut.io.config.freqWord.toLong}")
+      assert(dut.io.oscConfig.freqWord.toLong == expectedFreq, s"Expected atomic update to $expectedFreq, got ${dut.io.oscConfig.freqWord.toLong}")
 
       println("Atomic Frequency Updates verified successfully.")
 
@@ -134,10 +134,10 @@ class RegisterBankSim extends AnyFunSuite {
       assert(dut.io.envConfig.gate.toInt == oldGate, "Envelope gate must be isolated from osc writes")
 
       // Step B: Capture current oscillator values
-      val oldFreq = dut.io.config.freqWord.toLong
-      val oldWave = dut.io.config.waveSelect.toInt
-      val oldPwm  = dut.io.config.pwmWidth.toInt
-      val oldVol  = dut.io.config.volume.toInt
+      val oldFreq = dut.io.oscConfig.freqWord.toLong
+      val oldWave = dut.io.oscConfig.waveSelect.toInt
+      val oldPwm  = dut.io.oscConfig.pwmWidth.toInt
+      val oldVol  = dut.io.oscConfig.volume.toInt
 
       // Write to envelope registers
       writeReg(0x40, 0x00)
@@ -145,10 +145,10 @@ class RegisterBankSim extends AnyFunSuite {
       writeReg(0x42, 0x00)
       
       // Verify oscillator values are completely unaffected
-      assert(dut.io.config.freqWord.toLong == oldFreq, "Oscillator frequency must be isolated from env writes")
-      assert(dut.io.config.waveSelect.toInt == oldWave, "Oscillator waveSelect must be isolated from env writes")
-      assert(dut.io.config.pwmWidth.toInt == oldPwm, "Oscillator pwmWidth must be isolated from env writes")
-      assert(dut.io.config.volume.toInt == oldVol, "Oscillator volume must be isolated from env writes")
+      assert(dut.io.oscConfig.freqWord.toLong == oldFreq, "Oscillator frequency must be isolated from env writes")
+      assert(dut.io.oscConfig.waveSelect.toInt == oldWave, "Oscillator waveSelect must be isolated from env writes")
+      assert(dut.io.oscConfig.pwmWidth.toInt == oldPwm, "Oscillator pwmWidth must be isolated from env writes")
+      assert(dut.io.oscConfig.volume.toInt == oldVol, "Oscillator volume must be isolated from env writes")
 
       println("Address Crosstalk & Channel Isolation verified successfully.")
     }

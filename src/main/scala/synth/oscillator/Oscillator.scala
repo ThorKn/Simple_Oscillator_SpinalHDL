@@ -2,20 +2,20 @@ package synth.oscillator
 
 import spinal.core._
 import spinal.lib._
-import synth.common.OscillatorConfig
+import synth.common.OscConfig
 
 class Oscillator extends Component {
   val io = new Bundle {
     val phaseTick = in Bool()
-    val config    = in(OscillatorConfig())
+    val config    = in(OscConfig())
     val sample    = master(Flow(SInt(16 bits)))
   }
 
   // Modules
-  val accumulator = new Accumulator()
-  val generators  = new Generators()
-  val noise       = new Noise()
-  val mux         = new Mux()
+  val accumulator = new OscAccumulator()
+  val generators  = new OscGenerators()
+  val noise       = new OscNoise()
+  val mux         = new OscMux()
 
   // Wire up the Accumulator: Phase advances only on phaseTick (480 kHz)
   accumulator.io.phaseTick := io.phaseTick

@@ -2,13 +2,13 @@ package synth.oscillator
 
 import spinal.core._
 import spinal.lib._
-import synth.common.Waveforms
+import synth.common.OscWaveforms
 
-class Generators extends Component {
+class OscGenerators extends Component {
   val io = new Bundle {
     val phase    = in UInt(24 bits)
     val pwmWidth = in UInt(8 bits)
-    val waves    = out(Waveforms())
+    val waves    = out(OscWaveforms())
   }
 
   // Sawtooth: Use the top 16 bits of the phase.

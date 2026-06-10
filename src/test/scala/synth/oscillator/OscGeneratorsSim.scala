@@ -3,9 +3,9 @@ package synth.oscillator
 import spinal.core.sim._
 import org.scalatest.funsuite.AnyFunSuite
 
-class WaveformSim extends AnyFunSuite {
+class OscGeneratorsSim extends AnyFunSuite {
   test("Waveform Generator mathematical verification") {
-    SimConfig.compile(new Generators).doSim { dut =>
+    SimConfig.compile(new OscGenerators).doSim { dut =>
       
       // Helper to check standard waveforms at a specific phase
       def checkStandard(phase: Long, expectedSaw: Int, expectedSquare: Int, expectedTri: Int, label: String): Unit = {
