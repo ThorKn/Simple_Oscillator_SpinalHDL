@@ -65,8 +65,8 @@ class SynthSim extends AnyFunSuite {
       writeRegister(0x05, 0xFF)
 
       // Configure Envelope Parameters:
-      // Enable envelope (bit 0 = 1) -> value = 1 (address 0x40)
-      writeRegister(0x40, 0x01)
+      // Enable envelope (disable bit 0 = 0) -> value = 0 (address 0x40)
+      writeRegister(0x40, 0x00)
       // Gate ON (bit 0 = 1) -> value = 1 (address 0x45)
       writeRegister(0x45, 0x01)
       // Attack = 0 (fastest 0.5 ms rise) (address 0x41)
@@ -77,8 +77,8 @@ class SynthSim extends AnyFunSuite {
       writeRegister(0x43, 0x80)
 
       // Configure Filter Parameters:
-      // Enable filter (bit 0 = 1) -> value = 1 (address 0x50)
-      writeRegister(0x50, 0x01)
+      // Enable filter (disable bit 0 = 0) -> value = 0 (address 0x50)
+      writeRegister(0x50, 0x00)
       writeRegister(0x51, 0x00)
       writeRegister(0x52, 0x80)
       writeRegister(0x53, 0x00)
@@ -161,6 +161,84 @@ class SynthSim extends AnyFunSuite {
       // Proves the active envelope actually scales output up dynamically over time (it must not remain constant or static at max/min)
       assert(maxAbsValue > 5000, s"Envelope output remained too quiet. Max absolute value: $maxAbsValue")
       println(f"Integration simulation successful: $nonZeroSamples non-zero stereo PWM frames modulated by envelope captured!")
+    }
+  }
+
+  test("Synth bypass modes - filter and envelope bypass verification") {
+    SimConfig.withWave.compile(new Synth).doSim { dut =>
+      dut.io.clk24MHz #= false
+      dut.io.reset #= true
+      dut.io.uartRx #= true
+
+      fork {
+        while (true) {
+          dut.io.clk24MHz #= !dut.io.clk24MHz.toBoolean
+          sleep(5)
+        }
+      }
+
+      // Reset
+      sleep(100)
+      dut.io.reset #= false
+      sleep(100)
+
+      val cyclesPerBit = 208
+      def sendUartByte(byte: Int): Unit = {
+        dut.io.uartRx #= false
+        sleep(cyclesPerBit * 10)
+        for (i <- 0 until 8) {
+          val bit = (byte >> i) & 1
+          dut.io.uartRx #= (bit == 1)
+          sleep(cyclesPerBit * 10)
+        }
+        dut.io.uartRx #= true
+        sleep(cyclesPerBit * 10)
+      }
+
+      def writeRegister(address: Int, data: Int): Unit = {
+        sendUartByte(0x01)
+        sendUartByte(address)
+        sendUartByte(data)
+      }
+
+      // Enable both modules (disable = 0)
+      writeRegister(0x40, 0x00)
+      writeRegister(0x50, 0x00)
+      
+      // Configure envelope gate ON to run it
+      writeRegister(0x45, 0x01)
+
+      // 1. Verify ENVELOPE BYPASS
+      // Initially not bypassed, volume should follow envelope shaper output (starts at 0)
+      sleep(1000)
+      assert(dut.core.envAttenuator.io.volume.toInt < 1023, "Initially envelope volume should be modulated and start low")
+
+      // Enable Envelope Bypass: write 0x02 to ENV_CTRL (0x40) (bit 1 is bypass)
+      println("Enabling Envelope Bypass...")
+      writeRegister(0x40, 0x02)
+      sleep(1000)
+      // Check that the envelope volume is locked to 1023
+      assert(dut.core.envAttenuator.io.volume.toInt == 1023, s"Envelope volume should be locked to 1023 when bypassed, got ${dut.core.envAttenuator.io.volume.toInt}")
+
+      // 2. Verify FILTER BYPASS
+      // Initially not bypassed (FILTER_CTRL = 0x00), so filter is active
+      // Enable Filter Bypass: write 0x02 to FILTER_CTRL (0x50) (bit 1 is bypass)
+      println("Enabling Filter Bypass...")
+      writeRegister(0x50, 0x02)
+      
+      // Run some cycles and verify that whenever decimator sampleIn is valid, its payload matches attenuator sampleOut payload
+      var matchedSamples = 0
+      for (_ <- 0 until 5000) {
+        sleep(10)
+        if (dut.core.decimator.io.sampleIn.valid.toBoolean) {
+          val decimatorIn = dut.core.decimator.io.sampleIn.payload.toInt
+          val attenuatorOut = dut.core.attenuator.io.sampleOut.payload.toInt
+          assert(decimatorIn == attenuatorOut, s"Bypass mismatch: decimatorIn=$decimatorIn, attenuatorOut=$attenuatorOut")
+          matchedSamples += 1
+        }
+      }
+      assert(matchedSamples > 0, "No valid samples traversed the bypassed audio path during verification period")
+      println(s"Filter bypass verified successfully with $matchedSamples matched samples!")
     }
   }
 }

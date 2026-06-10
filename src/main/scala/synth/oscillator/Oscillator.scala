@@ -11,7 +11,7 @@ class Oscillator extends Component {
     val sample    = master(Flow(SInt(16 bits)))
   }
 
-  // Instantiate submodules within the same package
+  // Modules
   val accumulator = new Accumulator()
   val generators  = new Generators()
   val noise       = new Noise()

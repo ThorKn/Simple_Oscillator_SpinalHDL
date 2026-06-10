@@ -126,7 +126,7 @@ The module shall:
   - `TimingGenerator`: Generates clock-enable heartbeats (`phaseTick` and `sampleTick`).
   - `Oscillator`: Core DDS multi-waveform generation.
   - `EnvelopeGenerator`: Core dynamic ADSR waveshaper.
-  - `envAttenuator` (10-bit `Attenuator`): Modulates sample volume dynamically via the envelope generator output. Features envelope bypass logic: if envelope `Enable` (`ENV_CTRL` bit 0) is `0`, a constant maximum `1023` volume is applied, preserving backward compatibility.
+  - `envAttenuator` (10-bit `Attenuator`): Modulates sample volume dynamically via the envelope generator output. Features envelope bypass logic: if envelope bypass (`ENV_CTRL` bit 1) is `1`, a constant maximum `1023` volume is applied.
   - `attenuator` (8-bit `Attenuator`): Manages final master volume scaling.
   - `Decimator`: Downsamples the 480 kHz audio sample stream to 48 kHz.
   - `I2STransmitter`: Serializes parallel audio samples into a stereo I2S bitstream.
@@ -609,6 +609,8 @@ val logRom = Mem(UInt(8 bits), 257) init(logContent)
 val sigRom = Mem(UInt(8 bits), 257) init(sigContent)
 ```
 
+The implementation of the ROMs moved into the common package and is described in chapter 11.2.
+
 ### Multiplierless Hybrid 8+2 Linear Interpolation
 Linear interpolation requires the formula: `Y = Y0 + (f / 4) * (Y1 - Y0)`.
 To prevent expensive synthesis of physical multipliers on custom silicon, the fraction multiplication `(f/4) * delta_Y` is resolved in combinational shift-add structures.
@@ -881,7 +883,7 @@ The register space for the Filter Module is allocated at addresses `0x50` to `0x
 
 | Register Address | Name | Description |
 | ---------------- | ---- | ----------- |
-| `0x50`           | `FILTER_ENABLE` | Bit 0: Filter Enable (`0` = disabled, `1` = enabled) |
+| `0x50`           | `FILTER_CTRL`   | Bit 0: `FILTER_DISABLE` (`0` = active/enabled, `1` = disabled), Bit 1: `FILTER_BYPASS` (`0` = active, `1` = bypassed) |
 | `0x51`           | `FILTER_MODE`   | Bits 1:0: Response Mode (`00` = LP, `01` = BP, `10` = HP, `11` = Reserved) |
 | `0x52`           | `FILTER_CUTOFF` | 8-bit user-facing cutoff frequency |
 | `0x53`           | `FILTER_RESONANCE` | 8-bit user-facing resonance / feedback |
@@ -1029,11 +1031,11 @@ To avoid routing cluttered individual control wires throughout the top-level ent
   * `pwmWidth`: `UInt(8 bits)` — Duty cycle for the pulse waveform.
   * `volume`: `UInt(8 bits)` — Target volume setting (Reserved).
 * **`EnvelopeConfig`**: Routes ADSR settings to the Envelope Generator.
-  * `ctrl`: `Bits(8 bits)` — Bit field controls (`[0]`: Enable, `[1]`: Hard Sync, `[2]`: Loop, `[5:4]`: Curve).
+  * `ctrl`: `Bits(8 bits)` — Bit field controls (`[0]`: Disable, `[1]`: Bypass, `[2]`: Loop,`[3]`: Hard Sync Enable, `[5:4]`: Curve).
   * `attack` / `decay` / `sustain` / `release`: `UInt(8 bits)` — Envelope phase coefficients.
-  * `gate`: `Bits(8 bits)` — Bit `[0]`: Gate ON/OFF, Bit `[1]`: Software Hard Sync trigger.
+  * `gate`: `Bits(8 bits)` — Bit `[0]`: Gate ON/OFF, Bit `[1]`: Hard Sync Trigger.
 * **`FilterConfig`**: Routes parameters to the State Variable Filter.
-  * `enable`: `Bool` — Bypass/activation state of the filter core.
+  * `ctrl`: `Bits(8 bits)` — Bit field controls: (`[0]`: Disable, `[1]`: Bypass).
   * `mode`: `UInt(2 bits)` — Band configuration (`00`=LP, `01`=BP, `10`=HP).
   * `cutoff`: `UInt(8 bits)` — Filter cutoff frequency.
   * `resonance`: `UInt(8 bits)` — Filter resonance feedback strength.

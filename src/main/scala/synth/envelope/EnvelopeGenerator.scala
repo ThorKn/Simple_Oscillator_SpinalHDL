@@ -37,6 +37,7 @@ class EnvelopeGenerator extends Component {
   shaper.io.curveSelect  := ctrl.io.curveSelect
   shaper.io.activeStage  := ctrl.io.activeStage
   shaper.io.accumDir     := ctrl.io.accumDir
+  shaper.io.disable      := io.config.ctrl(0)
 
   // Connecting Top-Level inputs to Ctrl
   ctrl.io.syncIn         := io.syncIn

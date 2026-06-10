@@ -19,7 +19,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Initialize inputs to safe defaults
       dut.io.phaseTick #= false
       dut.io.syncIn #= false
-      dut.io.config.ctrl #= 0
+      dut.io.config.ctrl #= 1
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
       dut.io.config.sustain #= 0
@@ -49,7 +49,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Clear inputs
       dut.io.phaseTick #= false
       dut.io.syncIn #= false
-      dut.io.config.ctrl #= 0
+      dut.io.config.ctrl #= 1
       dut.io.config.gate #= 0
       dut.io.config.attack #= 0
       println("EnvelopeGenerator Power-On Reset & Boot Stability verified successfully.")
@@ -62,7 +62,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Configure Linear ADSR: 
       // attack = 0 (Minimum transient: 0.5 ms -> increment = 357914)
       // sustain = 128 (scaled unipolar sustain level of 512)
-      dut.io.config.ctrl #= 1 // Enable ON
+      dut.io.config.ctrl #= 0 // Enable ON (disable=0)
       dut.io.config.gate #= 1 // Gate ON
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
@@ -88,13 +88,13 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying 1-Cycle Pipeline Latency & Delay-Matched Sustain Clamping:")
       
       // Reset generator to IDLE
-      dut.io.config.ctrl #= 0
+      dut.io.config.ctrl #= 1
       dut.io.config.gate #= 0
       sleep(1)
       dut.clockDomain.waitSampling(5) // Allow pipeline to settle
       
       // Gate ON at Cycle 0
-      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.ctrl #= 0 // Enable (disable=0)
       dut.io.config.gate #= 1 // Gate ON
       sleep(1) // Settle Gate ON input before clocking
       
@@ -115,7 +115,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Simultaneous Gate & Sync Conflict Resolution:")
       
       // Pulse Gate ON and syncIn High at the same clock cycle
-      dut.io.config.ctrl #= 1
+      dut.io.config.ctrl #= 8 // Enable (disable=0), hard sync enabled (ctrl(3)=1)
       dut.io.config.gate #= 1
       dut.io.syncIn #= true
       sleep(1) // Settle inputs
@@ -154,14 +154,14 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Mid-Flight Wave-Shaping Curve Switching:")
       
       // Trigger a standard Linear Envelope rise
-      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.ctrl #= 0 // Enable (disable=0)
       dut.io.config.gate #= 1 // Gate ON
       dut.io.config.attack #= 0
       sleep(1)
       dut.clockDomain.waitSampling(5)
       
-      // Change curve selection to Exponential (ctrl[5:4] = 01, Enable = 1 -> value = 17 or 0x11) mid-transition
-      dut.io.config.ctrl #= 17
+      // Change curve selection to Exponential (ctrl[5:4] = 01, Enable = 1 -> value = 16 or 0x10) mid-transition
+      dut.io.config.ctrl #= 16
       sleep(1)
       dut.clockDomain.waitSampling()
       
@@ -182,7 +182,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       println("Verifying Full ADSR State Transition and Output Verification:")
       
       // Configure linear ADSR: Sustain = 128 (512)
-      dut.io.config.ctrl #= 1 // Enable
+      dut.io.config.ctrl #= 0 // Enable (disable=0)
       dut.io.config.gate #= 1 // Gate ON, Envelope Enable
       dut.io.config.sustain #= 128
       dut.io.config.attack #= 0
@@ -246,7 +246,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Initialize inputs to safe defaults
       dut.io.phaseTick #= false
       dut.io.syncIn #= false
-      dut.io.config.ctrl #= 1 // Enable ON, Curve = 0 (Linear)
+      dut.io.config.ctrl #= 0 // Enable ON, Curve = 0 (Linear)
       dut.io.config.attack #= 0
       dut.io.config.decay #= 0
       dut.io.config.sustain #= 0
@@ -258,7 +258,7 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
         println(s"Running test for $label...")
         
         // 1. Configure the envelope
-        dut.io.config.ctrl #= 1
+        dut.io.config.ctrl #= 0
         dut.io.config.attack #= attackVal
         dut.io.config.decay #= decayVal
         dut.io.config.sustain #= sustainVal
@@ -380,6 +380,43 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
 
       // Test Case 2: Mid-range parameter settings (A=128, D=128, S=128, R=128)
       runTest(attackVal = 128, decayVal = 128, sustainVal = 128, releaseVal = 128, label = "Mid-range Parameters")
+    }
+  }
+
+  test("EnvelopeGenerator - Disable during playback instantly resets to IDLE and gates output to 0") {
+    SimConfig.withWave.compile(new EnvelopeGenerator).doSim { dut =>
+      dut.clockDomain.forkStimulus(period = 10)
+      
+      // Initialize inputs to safe defaults
+      dut.io.phaseTick #= false
+      dut.io.syncIn #= false
+      dut.io.config.ctrl #= 0 // Enabled, linear curve
+      dut.io.config.attack #= 0
+      dut.io.config.decay #= 0
+      dut.io.config.sustain #= 128
+      dut.io.config.release #= 0
+      dut.io.config.gate #= 0
+      dut.clockDomain.waitSampling(25) // Settle reset
+
+      // Trigger gate ON
+      dut.io.config.gate #= 1
+      dut.io.phaseTick #= true
+      sleep(1)
+      dut.clockDomain.waitSampling(100)
+
+      // Verify envelope started and activeStage is ATTACK (1)
+      assert(dut.ctrl.io.activeStage.toInt == 1, s"Expected activeStage to be ATTACK (1), got ${dut.ctrl.io.activeStage.toInt}")
+      assert(dut.io.envelopeOut.payload.toInt > 0, "Envelope output should have started climbing")
+
+      // Disable during playback (ctrl bit 0 = 1)
+      dut.io.config.ctrl #= 1
+      sleep(1)
+      dut.clockDomain.waitSampling(2)
+
+      // Verify activeStage resets to IDLE (0) and output payload is 0
+      assert(dut.ctrl.io.activeStage.toInt == 0, s"Expected activeStage to be IDLE (0) after disable, got ${dut.ctrl.io.activeStage.toInt}")
+      assert(dut.io.envelopeOut.payload.toInt == 0, s"Expected envelopeOut payload to be 0 after disable, got ${dut.io.envelopeOut.payload.toInt}")
+      assert(dut.io.envelopeOutSigned.payload.toInt == 0, s"Expected envelopeOutSigned payload to be 0 after disable, got ${dut.io.envelopeOutSigned.payload.toInt}")
     }
   }
 }

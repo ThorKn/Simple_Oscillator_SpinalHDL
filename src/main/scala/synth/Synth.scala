@@ -1,6 +1,7 @@
 package synth
 
 import spinal.core._
+import spinal.core.sim._
 import spinal.lib._
 
 import synth.uart._
@@ -38,10 +39,8 @@ class Synth extends Component {
   // System Integration Area
   val core = new ClockingArea(coreClockDomain) {
 
-    // UART Subsystem Wrapper
+    // --- Modules ---
     val uart              = new Uart()
-    
-    // Synthesis and Output Modules
     val timingGen         = new TimingGenerator()
     val oscillator        = new Oscillator()
     val envGen            = new EnvelopeGenerator()
@@ -51,41 +50,48 @@ class Synth extends Component {
     val decimator         = new Decimator()
     val transmitter       = new I2STransmitter()
 
-    // --- UART Control Path ---
-    uart.io.rx := io.uartRx
+    // --- Simulation hooks
+    envAttenuator.io.volume.simPublic()
+    attenuator.io.sampleOut.valid.simPublic()
+    attenuator.io.sampleOut.payload.simPublic()
+    decimator.io.sampleIn.valid.simPublic()
+    decimator.io.sampleIn.payload.simPublic()
 
-    // --- Synthesis Engine Wiring ---
-
-    // 1. Tick & Control Distribution
+    // ------ 1. Tick Distribution
     oscillator.io.phaseTick        := timingGen.io.phaseTick
     envGen.io.phaseTick            := timingGen.io.phaseTick
-    envGen.io.syncIn               := False
     svf.io.phaseTick               := timingGen.io.phaseTick
-    // Connect phaseTick to attenuators for valid alignment
     envAttenuator.io.phaseTick     := timingGen.io.phaseTick
     attenuator.io.phaseTick        := timingGen.io.phaseTick
-    
     decimator.io.sampleTick        := timingGen.io.sampleTick
 
-    // 2. Control Signals (UART Subsystem -> Synth Engine)
+    // ------ 2. Sync Distribution
+    envGen.io.syncIn               := False
+
+    // ------ 3. Communication
+    uart.io.rx                      := io.uartRx
+
+    // ------ 4. Configurations
     oscillator.io.config           := uart.io.config
     envGen.io.config               := uart.io.envConfig
     svf.io.config                  := uart.io.filterConfig
-    val envBypassed = !uart.io.envConfig.ctrl(0)
+
+    // ------ 5. Volume
+    val envBypassed                = uart.io.envConfig.ctrl(1)
     envAttenuator.io.volume        := envBypassed ? U(1023, 10 bits) | envGen.io.envelopeOut.payload
     attenuator.io.volume           := uart.io.config.volume
 
-    // 3. Audio Data Path
-    // Oscillator (480kHz) -> Envelope Attenuator -> Master Volume Attenuator -> SVF Filter -> Decimator -> I2S Transmitter (48kHz)
+    // ------ 6. Audio Data Path
     oscillator.io.sample           >> envAttenuator.io.sampleIn
     envAttenuator.io.sampleOut     >> attenuator.io.sampleIn
-    attenuator.io.sampleOut        >> svf.io.sampleIn
-    svf.io.sampleOut               >> decimator.io.sampleIn
+    val filterBypassed             = uart.io.filterConfig.ctrl(1) 
+    svf.io.sampleIn                := attenuator.io.sampleOut
+    decimator.io.sampleIn          := filterBypassed ? attenuator.io.sampleOut | svf.io.sampleOut
     decimator.io.sampleOut         >> transmitter.io.sampleIn
-
-    // --- External Output Mapping ---
-    io.i2sBclk  := transmitter.io.bclk
-    io.i2sLrclk := transmitter.io.lrclk
-    io.i2sData  := transmitter.io.sdata
+    
+    // ------ 7. Output
+    io.i2sBclk                    := transmitter.io.bclk
+    io.i2sLrclk                   := transmitter.io.lrclk
+    io.i2sData                    := transmitter.io.sdata
   }
 }

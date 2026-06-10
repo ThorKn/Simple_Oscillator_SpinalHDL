@@ -13,6 +13,7 @@ class EnvelopeShaper extends Component {
     val curveSelect  = in UInt(2 bits)        // 00=Lin, 01=Exp, 10=Log, 11=S-Curve
     val activeStage  = in UInt(3 bits)        // Active FSM stage indicator (IDLE=0, ATTACK=1, DECAY=2, SUSTAIN=3, RELEASE=4)
     val accumDir     = in Bool()              // Direction of accumulator (0 = Forward, 1 = Reverse)
+    val disable      = in Bool()              // Force outputs to 0 when disabled
     val envelopeOut       = master(Flow(UInt(10 bits))) // 10-bit unipolar flow (0 to 1023)
     val envelopeOutSigned = master(Flow(SInt(10 bits))) // 10-bit bipolar flow (-512 to +511)
   }
@@ -92,12 +93,12 @@ class EnvelopeShaper extends Component {
   // 5. Parallel Output Conversion & Flow Gating (1-Cycle Latency Pipeline)
   // -------------------------------------------------------------------------
   // Unipolar Output Stage (0 to 1023) - Routed directly since FSM naturally holds baseIndex on Sustain
-  io.envelopeOut.payload := RegNext(finalValUnipolar) init(0)
+  io.envelopeOut.payload := RegNext(io.disable ? U(0, 10 bits) | finalValUnipolar) init(0)
 
   // Bipolar Output Stage (-512 to +511)
   // Invert the MSB to map 0 to 1023 unipolar to -512 to 511 signed center-zero combinationally
   val finalValBipolar = (finalValUnipolar ^ 0x200).asSInt
-  io.envelopeOutSigned.payload := RegNext(finalValBipolar) init(0)
+  io.envelopeOutSigned.payload := RegNext(io.disable ? SInt(10 bits).getZero | finalValBipolar) init(0)
 
   // Heartbeat valid flow gating qualified with active reset check
   val outValid = RegNext(io.phaseTick && !ClockDomain.current.isResetActive) init(False)

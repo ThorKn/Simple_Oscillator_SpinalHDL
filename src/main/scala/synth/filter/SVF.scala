@@ -22,9 +22,12 @@ class SVF extends Component {
   mapper.io.cutoff    := io.config.cutoff
   mapper.io.resonance := io.config.resonance
 
+  val disable = io.config.ctrl(0)
+  val bypass  = io.config.ctrl(1)
+
   // Connect Filter Core
   core.io.phaseTick      := io.phaseTick
-  core.io.clear          := !io.config.enable
+  core.io.clear          := disable
   core.io.sampleIn       := io.sampleIn.payload
   core.io.cutoffCoeff    := mapper.io.cutoffCoeff
   core.io.resonanceCoeff := mapper.io.resonanceCoeff
@@ -41,8 +44,8 @@ class SVF extends Component {
     outReg := mux.io.sampleOut
   }
 
-  // Drive output flow. Payload is gated to 0 and valid keeps running when filter is not enabled.
-  io.sampleOut.payload := io.config.enable ? outReg | SInt(16 bits).getZero
+  // Drive output flow. Payload is gated to 0 and valid keeps running when filter is disabled.
+  io.sampleOut.payload := !disable ? outReg | SInt(16 bits).getZero
   // The output valid pulse is synchronized back to the next phaseTick boundary
   io.sampleOut.valid   := io.phaseTick && !ClockDomain.current.isResetActive
 }

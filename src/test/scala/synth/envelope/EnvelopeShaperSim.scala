@@ -21,7 +21,9 @@ class EnvelopeShaperSim extends AnyFunSuite {
       dut.io.fraction #= 0
       dut.io.curveSelect #= 0
       dut.io.activeStage #= 0
-      dut.io.accumDir #= false      // Wait 1 clock cycle to stabilize signals under active reset
+      dut.io.accumDir #= false
+      dut.io.disable #= false
+      // Wait 1 clock cycle to stabilize signals under active reset
       dut.clockDomain.waitSampling()
 
       // ---------------------------------------------------------------------
@@ -144,6 +146,26 @@ class EnvelopeShaperSim extends AnyFunSuite {
       assert(!dut.io.envelopeOutSigned.valid.toBoolean, "envelopeOutSigned.valid must drop False when phaseTick is inactive")
       
       println("Audio Sample Gating Validation verified successfully.")
+
+      // ---------------------------------------------------------------------
+      // 1.3.5 Gated Output Payload on Disable
+      // ---------------------------------------------------------------------
+      println("Verifying Gated Output Payload on Disable:")
+      dut.io.phaseTick #= true
+      dut.io.baseIndex #= 128
+      dut.io.fraction #= 0
+      dut.io.disable #= true
+      dut.clockDomain.waitSampling(2)
+      
+      assert(dut.io.envelopeOut.payload.toInt == 0, s"envelopeOut.payload must be gated to 0 when disabled, got ${dut.io.envelopeOut.payload.toInt}")
+      assert(dut.io.envelopeOutSigned.payload.toInt == 0, s"envelopeOutSigned.payload must be gated to 0 when disabled, got ${dut.io.envelopeOutSigned.payload.toInt}")
+      
+      // Restore disable to false
+      dut.io.disable #= false
+      dut.clockDomain.waitSampling(2)
+      assert(dut.io.envelopeOut.payload.toInt > 0, "envelopeOut.payload should recover when disable is false")
+      
+      println("Gated Output Payload on Disable verified successfully.")
     }
   }
 }

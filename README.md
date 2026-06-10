@@ -533,7 +533,7 @@ The following registers are mapped into the `spinalSynth` SPI/UART register bus 
 
 | Register Address (Hex) | Register Name | Bit Width | Description |
 | :--- | :--- | :---: | :--- |
-| `0x40` | `ENV_CTRL` | 8 bits | Control bits: <br> `[0]` Env Gen Enable, <br> `[1]` Hard Sync Enable, <br> `[2]` Loop mode, <br> `[5:4]` Curve Model <br> (`00`=Lin, `01`=Exp, <br> `10`=Log, `11`=S-Curve) |
+| `0x40` | `ENV_CTRL` | 8 bits | Control bits: <br> `[0]` `ENV_DISABLE` (`0`=active/enabled, `1`=disabled), <br> `[1]` `ENV_BYPASS` (`0`=active modulation, `1`=bypass modulation), <br> `[2]` `ENV_LOOP` (`0`=single-shot, `1`=loop), <br> `[3]` `ENV_HARDSYNC_EN` (`0`=hard sync disabled, `1`=hard sync enabled), <br> `[5:4]` `ENV_CURVE` (`00`=Lin, `01`=Exp, <br> `10`=Log, `11`=S-Curve) |
 | `0x41` | `ENV_ATTACK` | 8 bits | Attack rate (time duration mapped) |
 | `0x42` | `ENV_DECAY` | 8 bits | Decay rate (time duration mapped) |
 | `0x43` | `ENV_SUSTAIN` | 8 bits | Sustain Level |
@@ -954,9 +954,9 @@ Mode encoding:
 
 The control signals are inputs to the top-level `SVF` module and distributed internally.
 
-When `enable` is deasserted, the module output shall be zero.
+When `FILTER_DISABLE` is asserted (set to 1), the module output shall be zero.
 
-Bypass functionality is handled outside of the filter module.
+Bypass functionality is handled at the toplevel `Synth.scala` multiplexer, routing audio around the SVF module when `FILTER_BYPASS` is active.
 
 ---
 
@@ -966,7 +966,7 @@ The following registers are mapped into the `spinalSynth` bus to control the SVF
 
 | Register Address (Hex) | Register Name | Bit Width | Description |
 | :--- | :--- | :---: | :--- |
-| `0x50` | `FILTER_ENABLE` | 8 bits | Bit `[0]`: Enable (`0`=disabled, `1`=enabled) |
+| `0x50` | `FILTER_CTRL` | 8 bits | Bit `[0]`: `FILTER_DISABLE` (`0`=active/enabled, `1`=disabled), <br> Bit `[1]`: `FILTER_BYPASS` (`0`=filter in audio path, `1`=bypass filter) |
 | `0x51` | `FILTER_MODE` | 8 bits | Bits `[1:0]`: Response Mode (`00`=LP, `01`=BP, `10`=HP, `11`=Reserved) |
 | `0x52` | `FILTER_CUTOFF` | 8 bits | 8-bit user cutoff value (mapped exponentially) |
 | `0x53` | `FILTER_RESONANCE` | 8 bits | 8-bit user resonance value (mapped quadratically) |
@@ -1385,13 +1385,13 @@ The following registers are mapped into the `spinalSynth` bus to control the syn
 | `0x03` | `WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
 | `0x04` | `PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
 | `0x05` | `VOLUME` | Master output volume (Reserved) | 8 bit |
-| `0x40` | `ENV_CTRL` | Envelope Control: [0] Enable, [1] Hard Sync Enable, [2] Loop, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
+| `0x40` | `ENV_CTRL` | Envelope Control: [0] Disable, [1] Bypass, [2] Loop, [3] Hard Sync Enable, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
 | `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
 | `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
 | `0x43` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
 | `0x44` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
 | `0x45` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
-| `0x50` | `FILTER_ENABLE` | Filter module enable: [0] Enable | 8 bit |
+| `0x50` | `FILTER_CTRL` | Filter Control: [0] Disable, [1] Bypass | 8 bit |
 | `0x51` | `FILTER_MODE` | Filter response mode: [1:0] Mode (00=LP, 01=BP, 10=HP, 11=Reserved) | 8 bit |
 | `0x52` | `FILTER_CUTOFF` | Cutoff frequency parameter | 8 bit |
 | `0x53` | `FILTER_RESONANCE` | Resonance feedback parameter | 8 bit |

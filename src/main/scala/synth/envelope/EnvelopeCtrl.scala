@@ -47,14 +47,16 @@ class EnvelopeCtrl extends Component {
   // Curve Select: ctrl[5:4]
   io.curveSelect := io.config.ctrl(5 downto 4).asUInt
 
-  // Hard Sync: Rising edge detection on syncIn (hardware) or gate(1) (software) qualified with ctrl[1] (Hard Sync Enable) and reset inactive
+  val disable = io.config.ctrl(0)
+
+  // Hard Sync: Rising edge detection on syncIn (hardware) or gate(1) (software) qualified with ctrl[3] (Hard Sync Enable) and reset inactive
   val syncInD1 = RegNext(io.syncIn) init(false)
   val hwSyncPulse = io.syncIn && !syncInD1
 
   val swSyncD1 = RegNext(io.config.gate(1)) init(false)
   val swSyncPulse = io.config.gate(1) && !swSyncD1
 
-  val hardSyncPulse = (hwSyncPulse || swSyncPulse) && io.config.ctrl(1) && !ClockDomain.current.isResetActive
+  val hardSyncPulse = (hwSyncPulse || swSyncPulse) && io.config.ctrl(3) && !ClockDomain.current.isResetActive
 
   // Direction control: Dynamically count downwards during DECAY and RELEASE phases.
   // Note: ctrl(4) (Reverse Mode) and ctrl(3) (Ping-Pong Mode) are reserved as future placeholders.
@@ -81,7 +83,7 @@ class EnvelopeCtrl extends Component {
 
     IDLE.whenIsActive {
       fsmActiveStage := EnvelopeStage.IDLE
-      when(gateOn) {
+      when(gateOn && !disable) {
         fsmResetAccum := True
         fsmRunAccum   := True
         goto(ATTACK)
@@ -91,7 +93,10 @@ class EnvelopeCtrl extends Component {
     ATTACK.whenIsActive {
       fsmActiveStage := EnvelopeStage.ATTACK
       fsmRunAccum    := True
-      when(hardSyncPulse) {
+      when(disable) {
+        fsmResetAccum := True
+        goto(IDLE)
+      } elsewhen(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
@@ -105,7 +110,10 @@ class EnvelopeCtrl extends Component {
     DECAY.whenIsActive {
       fsmActiveStage := EnvelopeStage.DECAY
       fsmRunAccum    := True
-      when(hardSyncPulse) {
+      when(disable) {
+        fsmResetAccum := True
+        goto(IDLE)
+      } elsewhen(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
@@ -123,7 +131,10 @@ class EnvelopeCtrl extends Component {
 
     SUSTAIN.whenIsActive {
       fsmActiveStage := EnvelopeStage.SUSTAIN
-      when(hardSyncPulse) {
+      when(disable) {
+        fsmResetAccum := True
+        goto(IDLE)
+      } elsewhen(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(!gateOn) {
@@ -134,7 +145,10 @@ class EnvelopeCtrl extends Component {
     RELEASE.whenIsActive {
       fsmActiveStage := EnvelopeStage.RELEASE
       fsmRunAccum    := True
-      when(hardSyncPulse) {
+      when(disable) {
+        fsmResetAccum := True
+        goto(IDLE)
+      } elsewhen(hardSyncPulse) {
         fsmResetAccum := True
         goto(ATTACK)
       } elsewhen(gateOn) {

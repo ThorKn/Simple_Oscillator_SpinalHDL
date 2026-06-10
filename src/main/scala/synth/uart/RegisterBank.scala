@@ -7,27 +7,27 @@ import synth.common.{RegisterWrite, OscillatorConfig, EnvelopeConfig, FilterConf
 class RegisterBank extends Component {
 
   val io = new Bundle {
-    val regWrite = slave(Flow(RegisterWrite()))
-    val config   = out(OscillatorConfig())
-    val envConfig = out(EnvelopeConfig())
-    val filterConfig = out(FilterConfig())
+    val regWrite        = slave(Flow(RegisterWrite()))
+    val config          = out(OscillatorConfig())
+    val envConfig       = out(EnvelopeConfig())
+    val filterConfig    = out(FilterConfig())
   }
 
   // --------------------------------------------------------------------------
   // Raw Register Storage
   // --------------------------------------------------------------------------
 
-  val freqLowReg      = Reg(Bits(8 bits)) init(0)
-  val freqMidReg      = Reg(Bits(8 bits)) init(0)
-  val freqHighReg     = Reg(Bits(8 bits)) init(0)
+  // Oscillator registers
+  val freqLowReg        = Reg(Bits(8 bits)) init(0)
+  val freqMidReg        = Reg(Bits(8 bits)) init(0)
+  val freqHighReg       = Reg(Bits(8 bits)) init(0)
+  val waveformReg       = Reg(Bits(8 bits)) init(0)
+  val pulseWidthReg     = Reg(Bits(8 bits)) init(0)
+  val volumeReg         = Reg(Bits(8 bits)) init(0)
   
-  // Staging registers for atomic commitment
-  val freqLowShadow   = Reg(Bits(8 bits)) init(0)
-  val freqMidShadow   = Reg(Bits(8 bits)) init(0)
-
-  val waveformReg     = Reg(Bits(8 bits)) init(0)
-  val pulseWidthReg   = Reg(Bits(8 bits)) init(0)
-  val volumeReg       = Reg(Bits(8 bits)) init(0)
+  // Staging registers for atomic commitment to frequency reg
+  val freqLowShadow     = Reg(Bits(8 bits)) init(0)
+  val freqMidShadow     = Reg(Bits(8 bits)) init(0)
 
   // Envelope registers
   val envCtrlReg        = Reg(Bits(8 bits)) init(0)
@@ -38,7 +38,7 @@ class RegisterBank extends Component {
   val envGateReg        = Reg(Bits(8 bits)) init(0)
 
   // Filter registers
-  val filterEnableReg   = Reg(Bits(8 bits)) init(0)
+  val filterCtrlReg     = Reg(Bits(8 bits)) init(0)
   val filterModeReg     = Reg(Bits(8 bits)) init(0)
   val filterCutoffReg   = Reg(Bits(8 bits)) init(0)
   val filterResReg      = Reg(Bits(8 bits)) init(0)
@@ -113,9 +113,9 @@ class RegisterBank extends Component {
         envGateReg := io.regWrite.payload.data
       }
 
-      // Filter Enable (FILTER_ENABLE)
+      // Filter Control (FILTER_CTRL)
       is(U"8'x50") {
-        filterEnableReg := io.regWrite.payload.data
+        filterCtrlReg := io.regWrite.payload.data
       }
 
       // Filter Mode (FILTER_MODE)
@@ -139,56 +139,49 @@ class RegisterBank extends Component {
   // Frequency Assembly
   // --------------------------------------------------------------------------
 
-  val frequencyCombined =
-    (freqHighReg ## freqMidReg ## freqLowReg).asUInt
+  val frequencyCombined = (freqHighReg ## freqMidReg ## freqLowReg).asUInt
 
   // --------------------------------------------------------------------------
   // One-Cycle Synchronization Stage
   // --------------------------------------------------------------------------
 
-  val oscFrequencyReg =
-    RegNext(frequencyCombined) init(0)
-
-  val oscWaveformReg =
-    RegNext(waveformReg.asUInt) init(0)
-
-  val oscPulseWidthReg =
-    RegNext(pulseWidthReg.asUInt) init(0)
-
-  val oscVolumeReg =
-    RegNext(volumeReg.asUInt) init(0)
+  // Synced oscillator registers
+  val syncedOscFrequencyReg    = RegNext(frequencyCombined) init(0)
+  val syncedOscWaveformReg     = RegNext(waveformReg.asUInt) init(0)
+  val syncedOscPulseWidthReg   = RegNext(pulseWidthReg.asUInt) init(0)
+  val syncedOscVolumeReg       = RegNext(volumeReg.asUInt) init(0)
 
   // Synced envelope registers
-  val syncedEnvCtrl        = RegNext(envCtrlReg) init(0)
-  val syncedEnvAttack      = RegNext(envAttackReg.asUInt) init(0)
-  val syncedEnvDecay       = RegNext(envDecayReg.asUInt) init(0)
-  val syncedEnvSustain     = RegNext(envSustainReg.asUInt) init(0)
-  val syncedEnvRelease     = RegNext(envReleaseReg.asUInt) init(0)
-  val syncedEnvGate       = RegNext(envGateReg) init(0)
+  val syncedEnvCtrl            = RegNext(envCtrlReg) init(0)
+  val syncedEnvAttack          = RegNext(envAttackReg.asUInt) init(0)
+  val syncedEnvDecay           = RegNext(envDecayReg.asUInt) init(0)
+  val syncedEnvSustain         = RegNext(envSustainReg.asUInt) init(0)
+  val syncedEnvRelease         = RegNext(envReleaseReg.asUInt) init(0)
+  val syncedEnvGate            = RegNext(envGateReg) init(0)
 
   // Synced filter registers
-  val syncedFilterEnable   = RegNext(filterEnableReg(0)) init(False)
-  val syncedFilterMode     = RegNext(filterModeReg.asUInt) init(0)
-  val syncedFilterCutoff   = RegNext(filterCutoffReg.asUInt) init(0)
-  val syncedFilterRes      = RegNext(filterResReg.asUInt) init(0)
+  val syncedFilterCtrl         = RegNext(filterCtrlReg) init(0)
+  val syncedFilterMode         = RegNext(filterModeReg.asUInt) init(0)
+  val syncedFilterCutoff       = RegNext(filterCutoffReg.asUInt) init(0)
+  val syncedFilterRes          = RegNext(filterResReg.asUInt) init(0)
 
   // --------------------------------------------------------------------------
   // Outputs
   // --------------------------------------------------------------------------
 
-  io.config.freqWord   := oscFrequencyReg
-  io.config.waveSelect := oscWaveformReg(2 downto 0)
-  io.config.pwmWidth   := oscPulseWidthReg
-  io.config.volume     := oscVolumeReg
+  io.config.freqWord        := syncedOscFrequencyReg
+  io.config.waveSelect      := syncedOscWaveformReg(2 downto 0)
+  io.config.pwmWidth        := syncedOscPulseWidthReg
+  io.config.volume          := syncedOscVolumeReg
 
-  io.envConfig.ctrl        := syncedEnvCtrl
-  io.envConfig.attack      := syncedEnvAttack
-  io.envConfig.decay       := syncedEnvDecay
-  io.envConfig.sustain     := syncedEnvSustain
-  io.envConfig.release     := syncedEnvRelease
-  io.envConfig.gate        := syncedEnvGate
+  io.envConfig.ctrl         := syncedEnvCtrl
+  io.envConfig.attack       := syncedEnvAttack
+  io.envConfig.decay        := syncedEnvDecay
+  io.envConfig.sustain      := syncedEnvSustain
+  io.envConfig.release      := syncedEnvRelease
+  io.envConfig.gate         := syncedEnvGate
 
-  io.filterConfig.enable    := syncedFilterEnable
+  io.filterConfig.ctrl      := syncedFilterCtrl
   io.filterConfig.mode      := syncedFilterMode(1 downto 0)
   io.filterConfig.cutoff    := syncedFilterCutoff
   io.filterConfig.resonance := syncedFilterRes

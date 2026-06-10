@@ -13,7 +13,7 @@ class SVFSim extends AnyFunSuite {
 
       // Initialize inputs to safe defaults
       dut.io.phaseTick #= false
-      dut.io.config.enable #= false
+      dut.io.config.ctrl #= 1
       dut.io.config.mode #= 0
       dut.io.config.cutoff #= 128
       dut.io.config.resonance #= 0
@@ -45,7 +45,7 @@ class SVFSim extends AnyFunSuite {
       // ---------------------------------------------------------------------
 
       println("Verifying Next-phaseTick Output Flow Synchronization Timing:")
-      dut.io.config.enable #= true
+      dut.io.config.ctrl #= 0
       dut.io.config.mode #= 0 // LP mode
       dut.io.config.cutoff #= 128
       dut.io.config.resonance #= 0
@@ -90,7 +90,7 @@ class SVFSim extends AnyFunSuite {
       // When enable is False:
       // - sampleOut.payload must be 0 immediately
       // - sampleOut.valid must continue to pulse in sync with the next phaseTick boundary
-      dut.io.config.enable #= false
+      dut.io.config.ctrl #= 1
       dut.clockDomain.waitSampling()
 
       // Feed sample when disabled
@@ -117,7 +117,7 @@ class SVFSim extends AnyFunSuite {
       // 3. Filter Frequency Response (Lowpass / Highpass Behavior)
       // ---------------------------------------------------------------------
       println("Verifying Filter Frequency Response Behavior:")
-      dut.io.config.enable #= true
+      dut.io.config.ctrl #= 0
       dut.io.config.cutoff #= 100
       dut.io.config.resonance #= 10 // Moderate resonance
       dut.clockDomain.waitSampling()
@@ -191,7 +191,7 @@ class SVFSim extends AnyFunSuite {
       dut.clockDomain.forkStimulus(period = 10)
 
       dut.io.phaseTick #= false
-      dut.io.config.enable #= true
+      dut.io.config.ctrl #= 0
       dut.io.config.mode #= 0 // LP mode
       dut.io.config.cutoff #= 128
       dut.io.config.resonance #= 0
