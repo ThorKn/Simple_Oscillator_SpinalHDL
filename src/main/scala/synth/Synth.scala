@@ -42,7 +42,7 @@ class Synth extends Component {
     // --- Modules ---
     val uart              = new Uart()
     val timingGen         = new TimingGenerator()
-    val oscillator        = new Oscillator()
+    val osc               = new Oscillator()
     val envGen            = new EnvelopeGenerator()
     val envAttenuator     = new Attenuator(volumeWidth = 10)
     val attenuator        = new Attenuator()
@@ -58,7 +58,7 @@ class Synth extends Component {
     decimator.io.sampleIn.payload.simPublic()
 
     // ------ 1. Tick Distribution
-    oscillator.io.phaseTick        := timingGen.io.phaseTick
+    osc.io.phaseTick               := timingGen.io.phaseTick
     envGen.io.phaseTick            := timingGen.io.phaseTick
     svf.io.phaseTick               := timingGen.io.phaseTick
     envAttenuator.io.phaseTick     := timingGen.io.phaseTick
@@ -72,17 +72,17 @@ class Synth extends Component {
     uart.io.rx                      := io.uartRx
 
     // ------ 4. Configurations
-    oscillator.io.config           := uart.io.config
+    osc.io.config                  := uart.io.oscConfig
     envGen.io.config               := uart.io.envConfig
     svf.io.config                  := uart.io.filterConfig
 
     // ------ 5. Volume
     val envBypassed                = uart.io.envConfig.ctrl(1)
     envAttenuator.io.volume        := envBypassed ? U(1023, 10 bits) | envGen.io.envelopeOut.payload
-    attenuator.io.volume           := uart.io.config.volume
+    attenuator.io.volume           := uart.io.oscConfig.volume
 
     // ------ 6. Audio Data Path
-    oscillator.io.sample           >> envAttenuator.io.sampleIn
+    osc.io.sample                  >> envAttenuator.io.sampleIn
     envAttenuator.io.sampleOut     >> attenuator.io.sampleIn
     val filterBypassed             = uart.io.filterConfig.ctrl(1) 
     svf.io.sampleIn                := attenuator.io.sampleOut

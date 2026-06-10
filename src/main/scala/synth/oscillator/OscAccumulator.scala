@@ -3,7 +3,7 @@ package synth.oscillator
 import spinal.core._
 import spinal.lib._
 
-class Accumulator extends Component {
+class OscAccumulator extends Component {
   val io = new Bundle {
     val phaseTick = in Bool()
     val freqWord  = in UInt(24 bits)

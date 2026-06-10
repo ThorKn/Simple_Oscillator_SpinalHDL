@@ -2,12 +2,12 @@ package synth.oscillator
 
 import spinal.core._
 import spinal.lib._
-import synth.common.Waveforms
+import synth.common.OscWaveforms
 
-class Mux extends Component {
+class OscMux extends Component {
   val io = new Bundle {
     val waveSelect = in UInt(3 bits)
-    val waves      = in(Waveforms())
+    val waves      = in(OscWaveforms())
     val noiseWave  = in SInt(16 bits)
     val sample     = out SInt(16 bits)
   }

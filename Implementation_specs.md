@@ -65,10 +65,10 @@ spinalSynth/
 │   │           │   └── RegisterBank.scala        # Parameter Storage
 │   │           ├── oscillator/             # Core Oscillator logic (per Section 4)
 │   │           │   ├── Oscillator.scala    # Main Oscillator module
-│   │           │   ├── Accumulator.scala   # Phase logic
-│   │           │   ├── Noise.scala         # LFSR logic
-│   │           │   ├── Generators.scala    # Waveform logic (Saw, Tri, etc.)
-│   │           │   └── Mux.scala           # Waveform selection
+│   │           │   ├── OscAccumulator.scala # Phase logic
+│   │           │   ├── OscNoise.scala      # LFSR logic
+│   │           │   ├── OscGenerators.scala # Waveform logic (Saw, Tri, etc.)
+│   │           │   └── OscMux.scala        # Waveform selection
 │   │           ├── envelope/               # Envelope Generator logic
 │   │           │   ├── EnvelopeGenerator.scala   # Coordinator wrapper module
 │   │           │   ├── EnvelopeCtrl.scala        # Control FSM & LUT logic
@@ -97,7 +97,7 @@ spinalSynth/
 │               │   ├── RegisterBankSim.scala        # Verifying parameter storage
 │               │   └── UartProtocolDecoderSim.scala # Verifying protocol parsing
 │               ├── oscillator/
-│               │   └── WaveformSim.scala   # Verifying Generator math
+│               │   └── OscGeneratorsSim.scala # Verifying Generator math
 │               ├── envelope/
 │               │   ├── EnvelopeAccumulatorSim.scala # Verifying accumulator phase & wrapping
 │               │   ├── EnvelopeCtrlSim.scala        # Verifying control FSM & loops
@@ -211,7 +211,7 @@ Uart
 ```scala
 val io = new Bundle {
     val rx        = in Bool()
-    val config    = out(OscillatorConfig())
+    val oscConfig = out(OscConfig())
     val envConfig = out(EnvelopeConfig())
 }
 ```
@@ -248,16 +248,16 @@ val io = new Bundle {
 
 ### Atomic Write Staging Mechanism
 To prevent audibly jarring sweep glitches or frequency artifacts, the multi-byte frequency configuration transitions atomically:
-- **`FREQ_LOW` (`0x00`)**: Staged into a temporary staging register `freqLowShadow`.
-- **`FREQ_MID` (`0x01`)**: Staged into a temporary staging register `freqMidShadow`.
-- **`FREQ_HIGH` (`0x02`)**: Directly commits the newly written high byte (`freqHighReg`) and transfers both staged shadow registers (`freqMidReg := freqMidShadow`, `freqLowReg := freqLowShadow`) to the active registers simultaneously on a single clock edge.
+- **`OSC_FREQ_LOW` (`0x30`)**: Staged into a temporary staging register `oscFreqLowShadow`.
+- **`OSC_FREQ_MID` (`0x31`)**: Staged into a temporary staging register `oscFreqMidShadow`.
+- **`OSC_FREQ_HIGH` (`0x32`)**: Directly commits the newly written high byte (`oscFreqHighReg`) and transfers both staged shadow registers (`oscFreqMidReg := oscFreqMidShadow`, `oscFreqLowReg := oscFreqLowShadow`) to the active registers simultaneously on a single clock edge.
 
 ### IO Bundle
 
 ```scala
 val io = new Bundle {
     val regWrite  = slave(Flow(RegisterWrite()))
-    val config    = out(OscillatorConfig())
+    val oscConfig = out(OscConfig())
     val envConfig = out(EnvelopeConfig())
 }
 ```
@@ -272,10 +272,10 @@ The Oscillator package connects the four submodules, as shown in the following p
 
 ```text
 Oscillator
- ├── Accumulator
- ├── Noise
- ├── Generators
- └── Mux
+ ├── OscAccumulator
+ ├── OscNoise
+ ├── OscGenerators
+ └── OscMux
 ```
 
 ### Purpose
@@ -295,7 +295,7 @@ Responsibilities:
 ```scala
 val io = new Bundle {
     val phaseTick = in Bool()
-    val config    = in(OscillatorConfig())
+    val config    = in(OscConfig())
     val sample    = master(Flow(SInt(16 bits)))
 }
 ```
@@ -303,7 +303,7 @@ val io = new Bundle {
 
 ## 5.1 Oscillator Submodules
 
-### Accumulator
+### OscAccumulator
 
 Responsible for:
 
@@ -319,7 +319,7 @@ val io = new Bundle {
 }
 ```
 
-### Noise
+### OscNoise
 
 Responsible for:
 
@@ -335,7 +335,7 @@ val io = new Bundle {
 }
 ```
 
-### Generators
+### OscGenerators
 
 Responsible for:
 
@@ -348,13 +348,13 @@ Responsible for:
 val io = new Bundle {
     val phase    = in UInt(24 bits)
     val pwmWidth = in UInt(8 bits)
-    val waves    = out(Waveforms())
+    val waves    = out(OscWaveforms())
 }
 ```
 
 The module shall contain only combinational logic.
 
-### Mux
+### OscMux
 
 Responsible for:
 
@@ -364,7 +364,7 @@ Responsible for:
 ```scala
 val io = new Bundle {
     val waveSelect = in UInt(3 bits)
-    val waves      = in(Waveforms())
+    val waves      = in(OscWaveforms())
     val noiseWave  = in SInt(16 bits)
     val sample     = out SInt(16 bits)
 }
@@ -373,19 +373,19 @@ val io = new Bundle {
 ## 5.2 Oscillator signal flow
 
 ```text
-Accumulator ── phase ──┐
+OscAccumulator ── phase ──┐
                         │
                         ↓
-                   Generators
+                  OscGenerators
                         │
                         ├── sawWave
                         ├── squareWave
                         ├── pwmWave
                         └── triangleWave
 
-Noise ── noiseSample ───┘
+OscNoise ── noiseSample ───┘
                         ↓
-                       Mux
+                      OscMux
                         ↓
                      sample
 ```
@@ -1025,7 +1025,7 @@ The `Types.scala` file defines case classes and bundles used for internal bus tr
 ### 11.1.2 Module Configuration Bundles
 To avoid routing cluttered individual control wires throughout the top-level entity, settings from the `RegisterBank` are packaged into unified configuration bundles:
 
-* **`OscillatorConfig`**: Routes parameters from the UART registers to the Oscillator.
+* **`OscConfig`**: Routes parameters from the UART registers to the Oscillator.
   * `freqWord`: `UInt(24 bits)` — Complete committed DDS frequency increment.
   * `waveSelect`: `UInt(3 bits)` — Selection index of the active waveform.
   * `pwmWidth`: `UInt(8 bits)` — Duty cycle for the pulse waveform.
@@ -1041,7 +1041,7 @@ To avoid routing cluttered individual control wires throughout the top-level ent
   * `resonance`: `UInt(8 bits)` — Filter resonance feedback strength.
 
 ### 11.1.3 Internal Audio Routing Bundles
-* **`Waveforms`**: Routes individual generated waveforms from `Generators` to the output `Mux` combinational logic:
+* **`OscWaveforms`**: Routes individual generated waveforms from `Generators` to the output `Mux` combinational logic:
   * `saw` / `square` / `pwm` / `tri`: `SInt(16 bits)`.
 
 ### 11.1.4 Envelope Generator FSM Constants

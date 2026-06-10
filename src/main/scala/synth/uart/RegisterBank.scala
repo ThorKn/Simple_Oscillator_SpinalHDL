@@ -2,13 +2,13 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.{RegisterWrite, OscillatorConfig, EnvelopeConfig, FilterConfig}
+import synth.common.{RegisterWrite, OscConfig, EnvelopeConfig, FilterConfig}
 
 class RegisterBank extends Component {
 
   val io = new Bundle {
     val regWrite        = slave(Flow(RegisterWrite()))
-    val config          = out(OscillatorConfig())
+    val oscConfig       = out(OscConfig())
     val envConfig       = out(EnvelopeConfig())
     val filterConfig    = out(FilterConfig())
   }
@@ -18,16 +18,16 @@ class RegisterBank extends Component {
   // --------------------------------------------------------------------------
 
   // Oscillator registers
-  val freqLowReg        = Reg(Bits(8 bits)) init(0)
-  val freqMidReg        = Reg(Bits(8 bits)) init(0)
-  val freqHighReg       = Reg(Bits(8 bits)) init(0)
-  val waveformReg       = Reg(Bits(8 bits)) init(0)
-  val pulseWidthReg     = Reg(Bits(8 bits)) init(0)
-  val volumeReg         = Reg(Bits(8 bits)) init(0)
+  val oscFreqLowReg        = Reg(Bits(8 bits)) init(0)
+  val oscFreqMidReg        = Reg(Bits(8 bits)) init(0)
+  val oscFreqHighReg       = Reg(Bits(8 bits)) init(0)
+  val oscWaveformReg       = Reg(Bits(8 bits)) init(0)
+  val oscPulseWidthReg     = Reg(Bits(8 bits)) init(0)
+  val oscVolumeReg         = Reg(Bits(8 bits)) init(0)
   
   // Staging registers for atomic commitment to frequency reg
-  val freqLowShadow     = Reg(Bits(8 bits)) init(0)
-  val freqMidShadow     = Reg(Bits(8 bits)) init(0)
+  val oscFreqLowShadow     = Reg(Bits(8 bits)) init(0)
+  val oscFreqMidShadow     = Reg(Bits(8 bits)) init(0)
 
   // Envelope registers
   val envCtrlReg        = Reg(Bits(8 bits)) init(0)
@@ -51,36 +51,36 @@ class RegisterBank extends Component {
 
     switch(io.regWrite.payload.address) {
 
-      // Frequency Low (Stage in shadow register)
-      is(U"8'x00") {
-        freqLowShadow := io.regWrite.payload.data
+      // Frequency Low (Stage in shadow register) (OSC_FREQ_LOW)
+      is(U"8'x30") {
+        oscFreqLowShadow := io.regWrite.payload.data
       }
 
-      // Frequency Mid (Stage in shadow register)
-      is(U"8'x01") {
-        freqMidShadow := io.regWrite.payload.data
+      // Frequency Mid (Stage in shadow register) (OSC_FREQ_MID)
+      is(U"8'x31") {
+        oscFreqMidShadow := io.regWrite.payload.data
       }
 
-      // Frequency High (Trigger simultaneous atomic commit of High, Mid, and Low)
-      is(U"8'x02") {
-        freqHighReg := io.regWrite.payload.data
-        freqMidReg  := freqMidShadow
-        freqLowReg  := freqLowShadow
+      // Frequency High (Trigger simultaneous atomic commit of High, Mid, and Low) (OSC_FREQ_HIGH)
+      is(U"8'x32") {
+        oscFreqHighReg := io.regWrite.payload.data
+        oscFreqMidReg  := oscFreqMidShadow
+        oscFreqLowReg  := oscFreqLowShadow
       }
 
-      // Waveform
-      is(U"8'x03") {
-        waveformReg := io.regWrite.payload.data
+      // Waveform (OSC_WAVE_SEL)
+      is(U"8'x33") {
+        oscWaveformReg := io.regWrite.payload.data
       }
 
-      // Pulse Width
-      is(U"8'x04") {
-        pulseWidthReg := io.regWrite.payload.data
+      // Pulse Width (OSC_PWM_WIDTH)
+      is(U"8'x34") {
+        oscPulseWidthReg := io.regWrite.payload.data
       }
 
-      // Volume
-      is(U"8'x05") {
-        volumeReg := io.regWrite.payload.data
+      // Volume (OSC_VOLUME)
+      is(U"8'x35") {
+        oscVolumeReg := io.regWrite.payload.data
       }
 
       // Envelope Control (ENV_CTRL)
@@ -139,17 +139,17 @@ class RegisterBank extends Component {
   // Frequency Assembly
   // --------------------------------------------------------------------------
 
-  val frequencyCombined = (freqHighReg ## freqMidReg ## freqLowReg).asUInt
+  val oscFrequencyCombined = (oscFreqHighReg ## oscFreqMidReg ## oscFreqLowReg).asUInt
 
   // --------------------------------------------------------------------------
   // One-Cycle Synchronization Stage
   // --------------------------------------------------------------------------
 
   // Synced oscillator registers
-  val syncedOscFrequencyReg    = RegNext(frequencyCombined) init(0)
-  val syncedOscWaveformReg     = RegNext(waveformReg.asUInt) init(0)
-  val syncedOscPulseWidthReg   = RegNext(pulseWidthReg.asUInt) init(0)
-  val syncedOscVolumeReg       = RegNext(volumeReg.asUInt) init(0)
+  val syncedOscFreqWord      = RegNext(oscFrequencyCombined) init(0)
+  val syncedOscWaveSelect    = RegNext(oscWaveformReg.asUInt) init(0)
+  val syncedOscPwmWidth      = RegNext(oscPulseWidthReg.asUInt) init(0)
+  val syncedOscVolume        = RegNext(oscVolumeReg.asUInt) init(0)
 
   // Synced envelope registers
   val syncedEnvCtrl            = RegNext(envCtrlReg) init(0)
@@ -169,10 +169,10 @@ class RegisterBank extends Component {
   // Outputs
   // --------------------------------------------------------------------------
 
-  io.config.freqWord        := syncedOscFrequencyReg
-  io.config.waveSelect      := syncedOscWaveformReg(2 downto 0)
-  io.config.pwmWidth        := syncedOscPulseWidthReg
-  io.config.volume          := syncedOscVolumeReg
+  io.oscConfig.freqWord        := syncedOscFreqWord
+  io.oscConfig.waveSelect      := syncedOscWaveSelect(2 downto 0)
+  io.oscConfig.pwmWidth        := syncedOscPwmWidth
+  io.oscConfig.volume          := syncedOscVolume
 
   io.envConfig.ctrl         := syncedEnvCtrl
   io.envConfig.attack       := syncedEnvAttack

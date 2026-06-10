@@ -9,7 +9,7 @@ case class RegisterWrite() extends Bundle {
 }
 
 // Unified configuration bundle sent from Register Bank to the Oscillator
-case class OscillatorConfig() extends Bundle {
+case class OscConfig() extends Bundle {
   val freqWord   = UInt(24 bits)
   val waveSelect = UInt(3 bits)
   val pwmWidth   = UInt(8 bits)
@@ -17,7 +17,7 @@ case class OscillatorConfig() extends Bundle {
 }
 
 // Unified waveforms bundle sent from Generators to Mux
-case class Waveforms() extends Bundle {
+case class OscWaveforms() extends Bundle {
   val saw    = SInt(16 bits)
   val square = SInt(16 bits)
   val pwm    = SInt(16 bits)
