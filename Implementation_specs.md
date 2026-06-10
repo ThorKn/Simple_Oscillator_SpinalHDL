@@ -248,9 +248,9 @@ val io = new Bundle {
 
 ### Atomic Write Staging Mechanism
 To prevent audibly jarring sweep glitches or frequency artifacts, the multi-byte frequency configuration transitions atomically:
-- **`OSC_FREQ_LOW` (`0x00`)**: Staged into a temporary staging register `oscFreqLowShadow`.
-- **`OSC_FREQ_MID` (`0x01`)**: Staged into a temporary staging register `oscFreqMidShadow`.
-- **`OSC_FREQ_HIGH` (`0x02`)**: Directly commits the newly written high byte (`oscFreqHighReg`) and transfers both staged shadow registers (`oscFreqMidReg := oscFreqMidShadow`, `oscFreqLowReg := oscFreqLowShadow`) to the active registers simultaneously on a single clock edge.
+- **`OSC_FREQ_LOW` (`0x30`)**: Staged into a temporary staging register `oscFreqLowShadow`.
+- **`OSC_FREQ_MID` (`0x31`)**: Staged into a temporary staging register `oscFreqMidShadow`.
+- **`OSC_FREQ_HIGH` (`0x32`)**: Directly commits the newly written high byte (`oscFreqHighReg`) and transfers both staged shadow registers (`oscFreqMidReg := oscFreqMidShadow`, `oscFreqLowReg := oscFreqLowShadow`) to the active registers simultaneously on a single clock edge.
 
 ### IO Bundle
 

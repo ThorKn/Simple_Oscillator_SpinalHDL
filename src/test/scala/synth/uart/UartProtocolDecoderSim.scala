@@ -44,9 +44,9 @@ class UartProtocolDecoderSim extends AnyFunSuite {
       dut.io.rxByte.valid #= false
       assert(dut.io.regWrite.valid.toBoolean == false)
 
-      // Byte 2: FREQ_HIGH Address (0x02)
+      // Byte 2: FREQ_HIGH Address (0x32)
       dut.io.rxByte.valid #= true
-      dut.io.rxByte.payload #= 0x02
+      dut.io.rxByte.payload #= 0x32
       dut.clockDomain.waitSampling()
       dut.io.rxByte.valid #= false
       assert(dut.io.regWrite.valid.toBoolean == false)
@@ -62,7 +62,7 @@ class UartProtocolDecoderSim extends AnyFunSuite {
       
       // Verify outputs are stable and correct
       assert(dut.io.regWrite.valid.toBoolean == true, "Expected regWrite valid to be True after 3rd byte")
-      assert(dut.io.regWrite.payload.address.toInt == 0x02, s"Expected address 0x02, got 0x${dut.io.regWrite.payload.address.toInt.toHexString}")
+      assert(dut.io.regWrite.payload.address.toInt == 0x32, s"Expected address 0x32, got 0x${dut.io.regWrite.payload.address.toInt.toHexString}")
       assert(dut.io.regWrite.payload.data.toInt == 0xAB, s"Expected data 0xAB, got 0x${dut.io.regWrite.payload.data.toInt.toHexString}")
 
       // Next clock cycle: valid signal must automatically drop back to False
@@ -83,9 +83,9 @@ class UartProtocolDecoderSim extends AnyFunSuite {
       // Wait an arbitrary spacing of 25 clock cycles
       dut.clockDomain.waitSampling(25)
       
-      // Push Byte 2 (0x05 - VOLUME)
+      // Push Byte 2 (0x35 - VOLUME)
       dut.io.rxByte.valid #= true
-      dut.io.rxByte.payload #= 0x05
+      dut.io.rxByte.payload #= 0x35
       dut.clockDomain.waitSampling()
       dut.io.rxByte.valid #= false
       assert(dut.io.regWrite.valid.toBoolean == false)
@@ -104,7 +104,7 @@ class UartProtocolDecoderSim extends AnyFunSuite {
       
       // Verify FSM correctly synchronized and committed the transaction
       assert(dut.io.regWrite.valid.toBoolean == true, "Expected valid transaction after arbitrary timing delays")
-      assert(dut.io.regWrite.payload.address.toInt == 0x05, "Expected address 0x05")
+      assert(dut.io.regWrite.payload.address.toInt == 0x35, "Expected address 0x35")
       assert(dut.io.regWrite.payload.data.toInt == 0x7F, "Expected data 0x7F")
       
       // Next clock cycle: valid signal must automatically drop back to False

@@ -23,7 +23,7 @@ class RegisterBankSim extends AnyFunSuite {
       // 1.2.1 Verify Reset Defaults during active reset
       println("Verifying Reset Defaults:")
       dut.io.regWrite.valid #= true
-      dut.io.regWrite.payload.address #= 0x03
+      dut.io.regWrite.payload.address #= 0x33
       dut.io.regWrite.payload.data #= 0xAA
       
       // Advance simulation time by 50 units (5 cycles) while reset is active
@@ -52,16 +52,16 @@ class RegisterBankSim extends AnyFunSuite {
       // 1.2.2 Verify Single-Byte Direct Updates
       println("Verifying Single-Byte Direct Updates:")
       
-      // Write Waveform Select (OSC_WAVE_SEL - 0x03) -> 3 (Triangle)
-      writeReg(0x03, 3)
+      // Write Waveform Select (OSC_WAVE_SEL - 0x33) -> 3 (Triangle)
+      writeReg(0x33, 3)
       assert(dut.io.oscConfig.waveSelect.toInt == 3, s"Expected waveSelect to be 3, got ${dut.io.oscConfig.waveSelect.toInt}")
 
-      // Write PWM Width (OSC_PWM_WIDTH - 0x04) -> 0xA5
-      writeReg(0x04, 0xA5)
+      // Write PWM Width (OSC_PWM_WIDTH - 0x34) -> 0xA5
+      writeReg(0x34, 0xA5)
       assert(dut.io.oscConfig.pwmWidth.toInt == 0xA5, s"Expected pwmWidth to be 0xA5, got ${dut.io.oscConfig.pwmWidth.toInt}")
 
-      // Write Volume (OSC_VOLUME - 0x05) -> 0x7F
-      writeReg(0x05, 0x7F)
+      // Write Volume (OSC_VOLUME - 0x35) -> 0x7F
+      writeReg(0x35, 0x7F)
       assert(dut.io.oscConfig.volume.toInt == 0x7F, s"Expected volume to be 0x7F, got ${dut.io.oscConfig.volume.toInt}")
 
       println("Single-Byte Direct Updates verified successfully.")
@@ -69,18 +69,18 @@ class RegisterBankSim extends AnyFunSuite {
       // 1.2.3 Verify Atomic 24-Bit Frequency Commitment
       println("Verifying Atomic Frequency Updates:")
 
-      // Step 1: Write Low byte (OSC_FREQ_LOW) -> 0x55
-      writeReg(0x00, 0x55)
+      // Step 1: Write Low byte (OSC_FREQ_LOW) -> 0x30
+      writeReg(0x30, 0x55)
       // Active frequency must remain unchanged (0)
       assert(dut.io.oscConfig.freqWord.toLong == 0, s"Expected frequency to remain 0 after OSC_FREQ_LOW write, got ${dut.io.oscConfig.freqWord.toLong}")
 
-      // Step 2: Write Mid byte (OSC_FREQ_MID) -> 0xAA
-      writeReg(0x01, 0xAA)
+      // Step 2: Write Mid byte (OSC_FREQ_MID) -> 0x31
+      writeReg(0x31, 0xAA)
       // Active frequency must still remain unchanged (0)
       assert(dut.io.oscConfig.freqWord.toLong == 0, s"Expected frequency to remain 0 after OSC_FREQ_MID write, got ${dut.io.oscConfig.freqWord.toLong}")
 
-      // Step 3: Write High byte (OSC_FREQ_HIGH) -> 0x0C (Trigger Commit)
-      writeReg(0x02, 0x0C)
+      // Step 3: Write High byte (OSC_FREQ_HIGH) -> 0x32 (Trigger Commit)
+      writeReg(0x32, 0x0C)
       // In the next cycle, the 24-bit frequency word must atomically update to 0x0CAA55 (830037)
       val expectedFreq = 0x0CAA55
       assert(dut.io.oscConfig.freqWord.toLong == expectedFreq, s"Expected atomic update to $expectedFreq, got ${dut.io.oscConfig.freqWord.toLong}")
@@ -121,9 +121,9 @@ class RegisterBankSim extends AnyFunSuite {
       val oldGate        = dut.io.envConfig.gate.toInt
 
       // Write to oscillator registers
-      writeReg(0x03, 1) // Change waveSelect to 1
-      writeReg(0x04, 0x50)
-      writeReg(0x05, 0x30)
+      writeReg(0x33, 1) // Change waveSelect to 1
+      writeReg(0x34, 0x50)
+      writeReg(0x35, 0x30)
 
       // Verify envelope values are completely unaffected
       assert(dut.io.envConfig.ctrl.toInt == oldCtrl, "Envelope ctrl must be isolated from osc writes")

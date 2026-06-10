@@ -329,9 +329,9 @@ All internal registers update precisely on the rising clock edge when `phaseTick
 
 ### 7.2.2 Atomic Multi-Byte Frequency Updates
 Since the 24-bit frequency word (`freqWord`) is configured over the 8-bit UART communication protocol, updates must be performed atomically to prevent transient audio pitch glitches:
-1. **OSC_FREQ_LOW (0x00):** Stages the lower 8 bits in a temporary shadow register.
-2. **OSC_FREQ_MID (0x01):** Stages the middle 8 bits in a temporary shadow register.
-3. **OSC_FREQ_HIGH (0x02):** Stages the upper 8 bits and commits the entire 24-bit word (`OSC_FREQ_HIGH ## OSC_FREQ_MID_Shadow ## OSC_FREQ_LOW_Shadow`) to the active synthesis registers in a single clock cycle.
+1. **OSC_FREQ_LOW (0x30):** Stages the lower 8 bits in a temporary shadow register.
+2. **OSC_FREQ_MID (0x31):** Stages the middle 8 bits in a temporary shadow register.
+3. **OSC_FREQ_HIGH (0x32):** Stages the upper 8 bits and commits the entire 24-bit word (`OSC_FREQ_HIGH ## OSC_FREQ_MID_Shadow ## OSC_FREQ_LOW_Shadow`) to the active synthesis registers in a single clock cycle.
 
 *Note: Always write registers in order (`OSC_FREQ_LOW` → `OSC_FREQ_MID` → `OSC_FREQ_HIGH`) to ensure consistent updates.*
 
@@ -447,12 +447,12 @@ The following registers are mapped into the `spinalSynth` bus to control the Osc
 
 | Register Address (Hex) | Register Name | Bit Width | Description |
 | :--- | :--- | :---: | :--- |
-| `0x00` | `OSC_FREQ_LOW` | 8 bits | Frequency Word Bits `[7:0]` (Lower byte of 24-bit DDS step) |
-| `0x01` | `OSC_FREQ_MID` | 8 bits | Frequency Word Bits `[15:8]` (Middle byte of 24-bit DDS step) |
-| `0x02` | `OSC_FREQ_HIGH` | 8 bits | Frequency Word Bits `[23:16]` (Upper byte of 24-bit DDS step; commit trigger) |
-| `0x03` | `OSC_WAVE_SEL` | 8 bits | Active waveform selection index (`0`=Saw, `1`=Square, `2`=PWM, `3`=Triangle, `4`=Noise) |
-| `0x04` | `OSC_PWM_WIDTH` | 8 bits | PWM duty cycle control value (scaled dynamically to 24-bit comparison range) |
-| `0x05` | `OSC_VOLUME` | 8 bits | Master output volume / output attenuation |
+| `0x30` | `OSC_FREQ_LOW` | 8 bits | Frequency Word Bits `[7:0]` (Lower byte of 24-bit DDS step) |
+| `0x31` | `OSC_FREQ_MID` | 8 bits | Frequency Word Bits `[15:8]` (Middle byte of 24-bit DDS step) |
+| `0x32` | `OSC_FREQ_HIGH` | 8 bits | Frequency Word Bits `[23:16]` (Upper byte of 24-bit DDS step; commit trigger) |
+| `0x33` | `OSC_WAVE_SEL` | 8 bits | Active waveform selection index (`0`=Saw, `1`=Square, `2`=PWM, `3`=Triangle, `4`=Noise) |
+| `0x34` | `OSC_PWM_WIDTH` | 8 bits | PWM duty cycle control value (scaled dynamically to 24-bit comparison range) |
+| `0x35` | `OSC_VOLUME` | 8 bits | Master output volume / output attenuation |
 
 ---
 
@@ -1380,12 +1380,12 @@ The following registers are mapped into the `spinalSynth` bus to control the syn
 
 | Address | Register Name | Description | Width |
 |---|---|---|---|
-| `0x00` | `OSC_FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
-| `0x01` | `OSC_FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
-| `0x02` | `OSC_FREQ_HIGH` | Frequency Word Bits [23:16] | 8 bit |
-| `0x03` | `OSC_WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
-| `0x04` | `OSC_PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
-| `0x05` | `OSC_VOLUME` | Master output volume / output attenuation | 8 bit |
+| `0x30` | `OSC_FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
+| `0x31` | `OSC_FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
+| `0x32` | `OSC_FREQ_HIGH` | Frequency Word Bits [23:16] | 8 bit |
+| `0x33` | `OSC_WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
+| `0x34` | `OSC_PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
+| `0x35` | `OSC_VOLUME` | Master output volume / output attenuation | 8 bit |
 | `0x40` | `ENV_CTRL` | Envelope Control: [0] Disable, [1] Bypass, [2] Loop, [3] Hard Sync Enable, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
 | `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
 | `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |

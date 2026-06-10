@@ -55,14 +55,14 @@ class SynthSim extends AnyFunSuite {
 
       // 4. Inject Live Register Configuration over UART
       println("\nStreaming Configuration over UART RX:")
-      // Configure waveform: 0x02 -> PWM Waveform (address 0x03) (OSC_WAVE_SEL)
-      writeRegister(0x03, 0x02)
+      // Configure waveform: 0x02 -> PWM Waveform (address 0x33) (OSC_WAVE_SEL)
+      writeRegister(0x33, 0x02)
       
-      // Configure PWM width: 0x80 -> 50% Duty Cycle (address 0x04) (OSC_PWM_WIDTH)
-      writeRegister(0x04, 0x80)
+      // Configure PWM width: 0x80 -> 50% Duty Cycle (address 0x34) (OSC_PWM_WIDTH)
+      writeRegister(0x34, 0x80)
 
-      // Configure volume: 0xFF -> Max Master Volume (address 0x05) (OSC_VOLUME)
-      writeRegister(0x05, 0xFF)
+      // Configure volume: 0xFF -> Max Master Volume (address 0x35) (OSC_VOLUME)
+      writeRegister(0x35, 0xFF)
 
       // Configure Envelope Parameters:
       // Enable envelope (disable bit 0 = 0) -> value = 0 (address 0x40)
@@ -84,9 +84,9 @@ class SynthSim extends AnyFunSuite {
       writeRegister(0x53, 0x00)
 
       // Configure Frequency Tuning Word (0x080000) atomically to output a 15 kHz tone:
-      writeRegister(0x00, 0x00) // OSC_FREQ_LOW -> Stages
-      writeRegister(0x01, 0x00) // OSC_FREQ_MID -> Stages
-      writeRegister(0x02, 0x08) // OSC_FREQ_HIGH -> Commits entire word atomically!
+      writeRegister(0x30, 0x00) // OSC_FREQ_LOW -> Stages
+      writeRegister(0x31, 0x00) // OSC_FREQ_MID -> Stages
+      writeRegister(0x32, 0x08) // OSC_FREQ_HIGH -> Commits entire word atomically!
       println("UART Injection finished. Waiting for I2S output serialization...")
 
       // 5. Start the I2S Monitor Thread to capture the active outputs

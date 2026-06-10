@@ -52,34 +52,34 @@ class RegisterBank extends Component {
     switch(io.regWrite.payload.address) {
 
       // Frequency Low (Stage in shadow register) (OSC_FREQ_LOW)
-      is(U"8'x00") {
+      is(U"8'x30") {
         oscFreqLowShadow := io.regWrite.payload.data
       }
 
       // Frequency Mid (Stage in shadow register) (OSC_FREQ_MID)
-      is(U"8'x01") {
+      is(U"8'x31") {
         oscFreqMidShadow := io.regWrite.payload.data
       }
 
       // Frequency High (Trigger simultaneous atomic commit of High, Mid, and Low) (OSC_FREQ_HIGH)
-      is(U"8'x02") {
+      is(U"8'x32") {
         oscFreqHighReg := io.regWrite.payload.data
         oscFreqMidReg  := oscFreqMidShadow
         oscFreqLowReg  := oscFreqLowShadow
       }
 
       // Waveform (OSC_WAVE_SEL)
-      is(U"8'x03") {
+      is(U"8'x33") {
         oscWaveformReg := io.regWrite.payload.data
       }
 
       // Pulse Width (OSC_PWM_WIDTH)
-      is(U"8'x04") {
+      is(U"8'x34") {
         oscPulseWidthReg := io.regWrite.payload.data
       }
 
       // Volume (OSC_VOLUME)
-      is(U"8'x05") {
+      is(U"8'x35") {
         oscVolumeReg := io.regWrite.payload.data
       }
 
