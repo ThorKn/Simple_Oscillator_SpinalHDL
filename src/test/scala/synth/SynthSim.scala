@@ -211,14 +211,14 @@ class SynthSim extends AnyFunSuite {
       // 1. Verify ENVELOPE BYPASS
       // Initially not bypassed, volume should follow envelope shaper output (starts at 0)
       sleep(1000)
-      assert(dut.core.envAttenuator.io.volume.toInt < 1023, "Initially envelope volume should be modulated and start low")
+      assert(dut.core.voice.envAttenuator.io.volume.toInt < 1023, "Initially envelope volume should be modulated and start low")
 
       // Enable Envelope Bypass: write 0x02 to ENV_CTRL (0x40) (bit 1 is bypass)
       println("Enabling Envelope Bypass...")
       writeRegister(0x40, 0x02)
       sleep(1000)
       // Check that the envelope volume is locked to 1023
-      assert(dut.core.envAttenuator.io.volume.toInt == 1023, s"Envelope volume should be locked to 1023 when bypassed, got ${dut.core.envAttenuator.io.volume.toInt}")
+      assert(dut.core.voice.envAttenuator.io.volume.toInt == 1023, s"Envelope volume should be locked to 1023 when bypassed, got ${dut.core.voice.envAttenuator.io.volume.toInt}")
 
       // 2. Verify FILTER BYPASS
       // Initially not bypassed (FILTER_CTRL = 0x00), so filter is active
@@ -232,7 +232,7 @@ class SynthSim extends AnyFunSuite {
         sleep(10)
         if (dut.core.decimator.io.sampleIn.valid.toBoolean) {
           val decimatorIn = dut.core.decimator.io.sampleIn.payload.toInt
-          val attenuatorOut = dut.core.attenuator.io.sampleOut.payload.toInt
+          val attenuatorOut = dut.core.voice.attenuator.io.sampleOut.payload.toInt
           assert(decimatorIn == attenuatorOut, s"Bypass mismatch: decimatorIn=$decimatorIn, attenuatorOut=$attenuatorOut")
           matchedSamples += 1
         }

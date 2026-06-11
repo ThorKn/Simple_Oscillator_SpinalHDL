@@ -378,8 +378,8 @@ class EnvelopeGeneratorSim extends AnyFunSuite {
       // Test Case 1: Low parameter settings (A=1, D=1, S=16, R=1)
       runTest(attackVal = 1, decayVal = 1, sustainVal = 16, releaseVal = 1, label = "Low Parameters")
 
-      // Test Case 2: Mid-range parameter settings (A=128, D=128, S=128, R=128)
-      runTest(attackVal = 128, decayVal = 128, sustainVal = 128, releaseVal = 128, label = "Mid-range Parameters")
+      // Test Case 2: Short-Mid parameter settings (A=48, D=48, S=128, R=48)
+      runTest(attackVal = 48, decayVal = 48, sustainVal = 128, releaseVal = 48, label = "Short-Mid Parameters")
     }
   }
 

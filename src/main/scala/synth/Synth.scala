@@ -5,13 +5,10 @@ import spinal.core.sim._
 import spinal.lib._
 
 import synth.uart._
-import synth.oscillator.Oscillator
-import synth.envelope.EnvelopeGenerator
-import synth.filter.SVF
 import synth.output._
-import synth.mixing.Attenuator
 import synth.timing.TimingGenerator
 import synth.common._
+import synth.voice.Voice
 
 class Synth extends Component {
 
@@ -42,56 +39,32 @@ class Synth extends Component {
     // --- Modules ---
     val uart              = new Uart()
     val timingGen         = new TimingGenerator()
-    val osc               = new Oscillator()
-    val envGen            = new EnvelopeGenerator()
-    val envAttenuator     = new Attenuator(volumeWidth = 10)
-    val attenuator        = new Attenuator()
-    val svf               = new SVF()
+    val voice             = new Voice()
     val decimator         = new Decimator()
     val transmitter       = new I2STransmitter()
 
     // --- Simulation hooks
-    envAttenuator.io.volume.simPublic()
-    attenuator.io.sampleOut.valid.simPublic()
-    attenuator.io.sampleOut.payload.simPublic()
     decimator.io.sampleIn.valid.simPublic()
     decimator.io.sampleIn.payload.simPublic()
 
-    // ------ 1. Tick Distribution
-    osc.io.phaseTick               := timingGen.io.phaseTick
-    envGen.io.phaseTick            := timingGen.io.phaseTick
-    svf.io.phaseTick               := timingGen.io.phaseTick
-    envAttenuator.io.phaseTick     := timingGen.io.phaseTick
-    attenuator.io.phaseTick        := timingGen.io.phaseTick
+    // ------ 1. Tick/Sync Distribution
+    voice.io.phaseTick             := timingGen.io.phaseTick
+    voice.io.syncIn                := False
     decimator.io.sampleTick        := timingGen.io.sampleTick
 
-    // ------ 2. Sync Distribution
-    envGen.io.syncIn               := False
+    // ------ 2. Communication
+    uart.io.rx                     := io.uartRx
 
-    // ------ 3. Communication
-    uart.io.rx                      := io.uartRx
+    // ------ 3. Configurations
+    voice.io.config                := uart.io.voiceConfig
 
-    // ------ 4. Configurations
-    osc.io.config                  := uart.io.oscConfig
-    envGen.io.config               := uart.io.envConfig
-    svf.io.config                  := uart.io.filterConfig
-
-    // ------ 5. Volume
-    val envBypassed                = uart.io.envConfig.ctrl(1)
-    envAttenuator.io.volume        := envBypassed ? U(1023, 10 bits) | envGen.io.envelopeOut.payload
-    attenuator.io.volume           := uart.io.oscConfig.volume
-
-    // ------ 6. Audio Data Path
-    osc.io.sample                  >> envAttenuator.io.sampleIn
-    envAttenuator.io.sampleOut     >> attenuator.io.sampleIn
-    val filterBypassed             = uart.io.filterConfig.ctrl(1) 
-    svf.io.sampleIn                := attenuator.io.sampleOut
-    decimator.io.sampleIn          := filterBypassed ? attenuator.io.sampleOut | svf.io.sampleOut
+    // ------ 4. Audio Data Path
+    voice.io.sampleOut             >> decimator.io.sampleIn
     decimator.io.sampleOut         >> transmitter.io.sampleIn
     
-    // ------ 7. Output
-    io.i2sBclk                    := transmitter.io.bclk
-    io.i2sLrclk                   := transmitter.io.lrclk
-    io.i2sData                    := transmitter.io.sdata
+    // ------ 5. Output I2S
+    io.i2sBclk                     := transmitter.io.bclk
+    io.i2sLrclk                    := transmitter.io.lrclk
+    io.i2sData                     := transmitter.io.sdata
   }
 }

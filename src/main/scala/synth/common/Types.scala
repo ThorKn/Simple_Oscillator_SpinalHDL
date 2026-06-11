@@ -49,3 +49,10 @@ case class FilterConfig() extends Bundle {
   val cutoff    = UInt(8 bits)
   val resonance = UInt(8 bits)
 }
+
+// Unified configuration bundle containing oscillator, envelope, and filter settings
+case class VoiceConfig() extends Bundle {
+  val osc    = OscConfig()
+  val env    = EnvelopeConfig()
+  val filter = FilterConfig()
+}
