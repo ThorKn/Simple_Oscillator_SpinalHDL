@@ -30,18 +30,18 @@ class RegisterBank extends Component {
   val oscFreqMidShadow     = Reg(Bits(8 bits)) init(0)
 
   // Envelope registers
-  val envCtrlReg        = Reg(Bits(8 bits)) init(0)
-  val envAttackReg      = Reg(Bits(8 bits)) init(0)
-  val envDecayReg       = Reg(Bits(8 bits)) init(0)
-  val envSustainReg     = Reg(Bits(8 bits)) init(0)
-  val envReleaseReg     = Reg(Bits(8 bits)) init(0)
-  val envGateReg        = Reg(Bits(8 bits)) init(0)
+  val envCtrlReg           = Reg(Bits(8 bits)) init(0)
+  val envAttackReg         = Reg(Bits(8 bits)) init(0)
+  val envDecayReg          = Reg(Bits(8 bits)) init(0)
+  val envSustainReg        = Reg(Bits(8 bits)) init(0)
+  val envReleaseReg        = Reg(Bits(8 bits)) init(0)
+  val envGateReg           = Reg(Bits(8 bits)) init(0)
 
   // Filter registers
-  val filterCtrlReg     = Reg(Bits(8 bits)) init(0)
-  val filterModeReg     = Reg(Bits(8 bits)) init(0)
-  val filterCutoffReg   = Reg(Bits(8 bits)) init(0)
-  val filterResReg      = Reg(Bits(8 bits)) init(0)
+  val filterCtrlReg        = Reg(Bits(8 bits)) init(0)
+  val filterModeReg        = Reg(Bits(8 bits)) init(0)
+  val filterCutoffReg      = Reg(Bits(8 bits)) init(0)
+  val filterResReg         = Reg(Bits(8 bits)) init(0)
 
   // --------------------------------------------------------------------------
   // Register Write Logic
@@ -146,10 +146,10 @@ class RegisterBank extends Component {
   // --------------------------------------------------------------------------
 
   // Synced oscillator registers
-  val syncedOscFreqWord      = RegNext(oscFrequencyCombined) init(0)
-  val syncedOscWaveSelect    = RegNext(oscWaveformReg.asUInt) init(0)
-  val syncedOscPwmWidth      = RegNext(oscPulseWidthReg.asUInt) init(0)
-  val syncedOscVolume        = RegNext(oscVolumeReg.asUInt) init(0)
+  val syncedOscFreqWord        = RegNext(oscFrequencyCombined) init(0)
+  val syncedOscWaveSelect      = RegNext(oscWaveformReg.asUInt) init(0)
+  val syncedOscPwmWidth        = RegNext(oscPulseWidthReg.asUInt) init(0)
+  val syncedOscVolume          = RegNext(oscVolumeReg.asUInt) init(0)
 
   // Synced envelope registers
   val syncedEnvCtrl            = RegNext(envCtrlReg) init(0)
@@ -169,10 +169,10 @@ class RegisterBank extends Component {
   // Outputs
   // --------------------------------------------------------------------------
 
-  io.oscConfig.freqWord        := syncedOscFreqWord
-  io.oscConfig.waveSelect      := syncedOscWaveSelect(2 downto 0)
-  io.oscConfig.pwmWidth        := syncedOscPwmWidth
-  io.oscConfig.volume          := syncedOscVolume
+  io.oscConfig.freqWord     := syncedOscFreqWord
+  io.oscConfig.waveSelect   := syncedOscWaveSelect(2 downto 0)
+  io.oscConfig.pwmWidth     := syncedOscPwmWidth
+  io.oscConfig.volume       := syncedOscVolume
 
   io.envConfig.ctrl         := syncedEnvCtrl
   io.envConfig.attack       := syncedEnvAttack
