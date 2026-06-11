@@ -8,7 +8,7 @@ class SynthSim extends AnyFunSuite {
   test("Synth end-to-end dynamic UART to I2S integration verification") {
     // Using a simulation frequency of 24MHz (period = 41.67ns)
     // We'll use 10 units as the half-period for simplicity in the sim
-    SimConfig.withWave.compile(new Synth).doSim { dut =>
+    SimConfig.withWave.compile(new Synth(numVoices = 2)).doSim { dut =>
       // 1. Initialize Inputs
       dut.io.clk24MHz #= false
       dut.io.reset #= true
@@ -165,7 +165,7 @@ class SynthSim extends AnyFunSuite {
   }
 
   test("Synth bypass modes - filter and envelope bypass verification") {
-    SimConfig.withWave.compile(new Synth).doSim { dut =>
+    SimConfig.withWave.compile(new Synth(numVoices = 2)).doSim { dut =>
       dut.io.clk24MHz #= false
       dut.io.reset #= true
       dut.io.uartRx #= true

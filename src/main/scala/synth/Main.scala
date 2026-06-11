@@ -9,6 +9,6 @@ object Main {
       targetDirectory = "rtl",
       defaultConfigForClockDomains = ClockDomainConfig(resetActiveLevel = HIGH)
     )
-    config.generateVerilog(new Synth)
+    config.generateVerilog(new Synth(numVoices = 2))
   }
 }

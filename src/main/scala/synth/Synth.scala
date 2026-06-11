@@ -9,8 +9,9 @@ import synth.output._
 import synth.timing.TimingGenerator
 import synth.common._
 import synth.voice.Voice
+import synth.mixing.Mixer
 
-class Synth extends Component {
+class Synth(numVoices: Int = 1) extends Component {
 
   val io = new Bundle {
     val clk24MHz = in Bool()
@@ -37,35 +38,43 @@ class Synth extends Component {
   val core = new ClockingArea(coreClockDomain) {
 
     // --- Modules ---
-    val uart              = new Uart()
+    val uart              = new Uart(numVoices)
     val timingGen         = new TimingGenerator()
-    val voice             = new Voice()
+    val voices            = Seq.tabulate(numVoices)(v => new Voice())
+    val mixer             = new Mixer(numVoices)
     val decimator         = new Decimator()
     val transmitter       = new I2STransmitter()
+
+    // Backward compatibility alias for single-voice simulation tests (e.g. SynthSim)
+    val voice             = voices(0)
 
     // --- Simulation hooks
     decimator.io.sampleIn.valid.simPublic()
     decimator.io.sampleIn.payload.simPublic()
 
-    // ------ 0. Synth config
+    // ------ 0. Synth config & Mixer Hookups
     val mixerCtrl                  = uart.io.synthConfig.mixerCtrl
+    mixer.io.mixerCtrl             := mixerCtrl
+    mixer.io.phaseTick             := timingGen.io.phaseTick
 
-    // ------ 1. Tick/Sync Distribution
-    voice.io.phaseTick             := timingGen.io.phaseTick
-    voice.io.syncIn                := False
+    // ------ 1. Tick/Sync Distribution & Routing Loop
+    for (v <- 0 until numVoices) {
+      voices(v).io.phaseTick       := timingGen.io.phaseTick
+      voices(v).io.syncIn          := False
+      voices(v).io.config          := uart.io.voiceConfig(v)
+      mixer.io.inputs(v)           := voices(v).io.sampleOut
+    }
+
     decimator.io.sampleTick        := timingGen.io.sampleTick
 
     // ------ 2. Communication
     uart.io.rx                     := io.uartRx
 
-    // ------ 3. Configurations
-    voice.io.config                := uart.io.voiceConfig(0)
-
-    // ------ 4. Audio Data Path
-    voice.io.sampleOut             >> decimator.io.sampleIn
+    // ------ 3. Audio Data Path
+    mixer.io.sampleOut             >> decimator.io.sampleIn
     decimator.io.sampleOut         >> transmitter.io.sampleIn
     
-    // ------ 5. Output I2S
+    // ------ 4. Output I2S
     io.i2sBclk                     := transmitter.io.bclk
     io.i2sLrclk                    := transmitter.io.lrclk
     io.i2sData                     := transmitter.io.sdata
