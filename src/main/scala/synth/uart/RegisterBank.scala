@@ -2,15 +2,13 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.{RegisterWrite, OscConfig, EnvelopeConfig, FilterConfig}
+import synth.common.{RegisterWrite, VoiceConfig}
 
 class RegisterBank extends Component {
 
   val io = new Bundle {
     val regWrite        = slave(Flow(RegisterWrite()))
-    val oscConfig       = out(OscConfig())
-    val envConfig       = out(EnvelopeConfig())
-    val filterConfig    = out(FilterConfig())
+    val voiceConfig     = out(VoiceConfig())
   }
 
   // --------------------------------------------------------------------------
@@ -169,20 +167,20 @@ class RegisterBank extends Component {
   // Outputs
   // --------------------------------------------------------------------------
 
-  io.oscConfig.freqWord     := syncedOscFreqWord
-  io.oscConfig.waveSelect   := syncedOscWaveSelect(2 downto 0)
-  io.oscConfig.pwmWidth     := syncedOscPwmWidth
-  io.oscConfig.volume       := syncedOscVolume
+  io.voiceConfig.osc.freqWord     := syncedOscFreqWord
+  io.voiceConfig.osc.waveSelect   := syncedOscWaveSelect(2 downto 0)
+  io.voiceConfig.osc.pwmWidth     := syncedOscPwmWidth
+  io.voiceConfig.osc.volume       := syncedOscVolume
 
-  io.envConfig.ctrl         := syncedEnvCtrl
-  io.envConfig.attack       := syncedEnvAttack
-  io.envConfig.decay        := syncedEnvDecay
-  io.envConfig.sustain      := syncedEnvSustain
-  io.envConfig.release      := syncedEnvRelease
-  io.envConfig.gate         := syncedEnvGate
+  io.voiceConfig.env.ctrl         := syncedEnvCtrl
+  io.voiceConfig.env.attack       := syncedEnvAttack
+  io.voiceConfig.env.decay        := syncedEnvDecay
+  io.voiceConfig.env.sustain      := syncedEnvSustain
+  io.voiceConfig.env.release      := syncedEnvRelease
+  io.voiceConfig.env.gate         := syncedEnvGate
 
-  io.filterConfig.ctrl      := syncedFilterCtrl
-  io.filterConfig.mode      := syncedFilterMode(1 downto 0)
-  io.filterConfig.cutoff    := syncedFilterCutoff
-  io.filterConfig.resonance := syncedFilterRes
+  io.voiceConfig.filter.ctrl      := syncedFilterCtrl
+  io.voiceConfig.filter.mode      := syncedFilterMode(1 downto 0)
+  io.voiceConfig.filter.cutoff    := syncedFilterCutoff
+  io.voiceConfig.filter.resonance := syncedFilterRes
 }

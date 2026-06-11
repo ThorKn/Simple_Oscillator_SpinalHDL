@@ -56,15 +56,13 @@ class Synth extends Component {
     uart.io.rx                     := io.uartRx
 
     // ------ 3. Configurations
-    voice.io.config.osc            := uart.io.oscConfig
-    voice.io.config.env            := uart.io.envConfig
-    voice.io.config.filter         := uart.io.filterConfig
+    voice.io.config                := uart.io.voiceConfig
 
     // ------ 4. Audio Data Path
-    decimator.io.sampleIn          := voice.io.sampleOut
+    voice.io.sampleOut             >> decimator.io.sampleIn
     decimator.io.sampleOut         >> transmitter.io.sampleIn
     
-    // ------ 7. Output
+    // ------ 5. Output I2S
     io.i2sBclk                     := transmitter.io.bclk
     io.i2sLrclk                    := transmitter.io.lrclk
     io.i2sData                     := transmitter.io.sdata
