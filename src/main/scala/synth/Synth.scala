@@ -47,6 +47,9 @@ class Synth extends Component {
     decimator.io.sampleIn.valid.simPublic()
     decimator.io.sampleIn.payload.simPublic()
 
+    // ------ 0. Synth config
+    val mixerCtrl                  = uart.io.synthConfig.mixerCtrl
+
     // ------ 1. Tick/Sync Distribution
     voice.io.phaseTick             := timingGen.io.phaseTick
     voice.io.syncIn                := False
@@ -56,7 +59,7 @@ class Synth extends Component {
     uart.io.rx                     := io.uartRx
 
     // ------ 3. Configurations
-    voice.io.config                := uart.io.voiceConfig
+    voice.io.config                := uart.io.voiceConfig(0)
 
     // ------ 4. Audio Data Path
     voice.io.sampleOut             >> decimator.io.sampleIn

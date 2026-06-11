@@ -58,3 +58,36 @@ object EnvelopeStage {
   val SUSTAIN = 3
   val RELEASE = 4
 }
+
+// Global configuration bundle for general synthesizer settings
+case class SynthConfig() extends Bundle {
+  val mixerCtrl = Bits(8 bits)
+}
+
+// Global synthesizer registers offsets (range: 0x00 to 0x0F)
+object SynthRegisterOffsets {
+  val MIXER_CTRL = 0x00
+}
+
+// Voice-specific registers offsets within each voice's aligned address window (offset 0x00 to 0x18)
+object VoiceRegisterOffsets {
+  val VOICE_CFG_START = 0x00
+  val OSC_FREQ_LOW    = 0x05
+  val OSC_FREQ_MID    = 0x06
+  val OSC_FREQ_HIGH   = 0x07
+  val OSC_WAVE_SEL    = 0x08
+  val OSC_PWM_WIDTH   = 0x09
+  val OSC_VOLUME      = 0x0A
+  
+  val ENV_CTRL        = 0x0D
+  val ENV_ATTACK      = 0x0E
+  val ENV_DECAY       = 0x0F
+  val ENV_SUSTAIN     = 0x10
+  val ENV_RELEASE     = 0x11
+  val ENV_GATE        = 0x12
+  
+  val FILTER_CTRL     = 0x15
+  val FILTER_MODE     = 0x16
+  val FILTER_CUTOFF   = 0x17
+  val FILTER_RESONANCE= 0x18
+}

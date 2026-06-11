@@ -2,44 +2,52 @@ package synth.uart
 
 import spinal.core._
 import spinal.lib._
-import synth.common.{RegisterWrite, VoiceConfig}
+import synth.common._
 
-class RegisterBank extends Component {
+class RegisterBank(numVoices: Int = 1) extends Component {
 
   val io = new Bundle {
-    val regWrite        = slave(Flow(RegisterWrite()))
-    val voiceConfig     = out(VoiceConfig())
+    val regWrite    = slave(Flow(RegisterWrite()))
+    val synthConfig = out(SynthConfig())
+    val voiceConfig = out(Vec(VoiceConfig(), numVoices))
   }
 
   // --------------------------------------------------------------------------
   // Raw Register Storage
   // --------------------------------------------------------------------------
 
-  // Oscillator registers
-  val oscFreqLowReg        = Reg(Bits(8 bits)) init(0)
-  val oscFreqMidReg        = Reg(Bits(8 bits)) init(0)
-  val oscFreqHighReg       = Reg(Bits(8 bits)) init(0)
-  val oscWaveformReg       = Reg(Bits(8 bits)) init(0)
-  val oscPulseWidthReg     = Reg(Bits(8 bits)) init(0)
-  val oscVolumeReg         = Reg(Bits(8 bits)) init(0)
-  
-  // Staging registers for atomic commitment to frequency reg
-  val oscFreqLowShadow     = Reg(Bits(8 bits)) init(0)
-  val oscFreqMidShadow     = Reg(Bits(8 bits)) init(0)
+  // Global registers
+  val mixerCtrlReg = Reg(Bits(8 bits)) init(0)
 
-  // Envelope registers
-  val envCtrlReg           = Reg(Bits(8 bits)) init(0)
-  val envAttackReg         = Reg(Bits(8 bits)) init(0)
-  val envDecayReg          = Reg(Bits(8 bits)) init(0)
-  val envSustainReg        = Reg(Bits(8 bits)) init(0)
-  val envReleaseReg        = Reg(Bits(8 bits)) init(0)
-  val envGateReg           = Reg(Bits(8 bits)) init(0)
+  // Voice registers structure
+  class VoiceRegs extends Area {
+    val oscFreqLow      = Reg(Bits(8 bits)) init(0)
+    val oscFreqMid      = Reg(Bits(8 bits)) init(0)
+    val oscFreqHigh     = Reg(Bits(8 bits)) init(0)
+    val oscWaveform     = Reg(Bits(8 bits)) init(0)
+    val oscPulseWidth   = Reg(Bits(8 bits)) init(0)
+    val oscVolume       = Reg(Bits(8 bits)) init(0)
 
-  // Filter registers
-  val filterCtrlReg        = Reg(Bits(8 bits)) init(0)
-  val filterModeReg        = Reg(Bits(8 bits)) init(0)
-  val filterCutoffReg      = Reg(Bits(8 bits)) init(0)
-  val filterResReg         = Reg(Bits(8 bits)) init(0)
+    // Staging registers for atomic commitment to frequency register
+    val freqLowShadow   = Reg(Bits(8 bits)) init(0)
+    val freqMidShadow   = Reg(Bits(8 bits)) init(0)
+
+    // Envelope registers
+    val envCtrl         = Reg(Bits(8 bits)) init(0)
+    val envAttack       = Reg(Bits(8 bits)) init(0)
+    val envDecay        = Reg(Bits(8 bits)) init(0)
+    val envSustain      = Reg(Bits(8 bits)) init(0)
+    val envRelease      = Reg(Bits(8 bits)) init(0)
+    val envGate         = Reg(Bits(8 bits)) init(0)
+
+    // Filter registers
+    val filterCtrl      = Reg(Bits(8 bits)) init(0)
+    val filterMode      = Reg(Bits(8 bits)) init(0)
+    val filterCutoff    = Reg(Bits(8 bits)) init(0)
+    val filterRes       = Reg(Bits(8 bits)) init(0)
+  }
+
+  val voices = Seq.fill(numVoices)(new VoiceRegs())
 
   // --------------------------------------------------------------------------
   // Register Write Logic
@@ -47,140 +55,86 @@ class RegisterBank extends Component {
 
   when(io.regWrite.valid) {
 
-    switch(io.regWrite.payload.address) {
-
-      // Frequency Low (Stage in shadow register) (OSC_FREQ_LOW)
-      is(U"8'x30") {
-        oscFreqLowShadow := io.regWrite.payload.data
+    // 1. Global Synth Configuration writes (range 0x00 to 0x0F)
+    when(io.regWrite.payload.address < 0x10) {
+      val synthMappings = Seq(
+        SynthRegisterOffsets.MIXER_CTRL -> mixerCtrlReg
+      )
+      for ((addr, reg) <- synthMappings) {
+        when(io.regWrite.payload.address === addr) {
+          reg := io.regWrite.payload.data
+        }
       }
+    }
 
-      // Frequency Mid (Stage in shadow register) (OSC_FREQ_MID)
-      is(U"8'x31") {
-        oscFreqMidShadow := io.regWrite.payload.data
-      }
+    // 2. Voice-specific register writes (base address 0x10 + v * 0x20)
+    for (v <- 0 until numVoices) {
+      val voiceBase = 0x10 + (v * 0x20)
+      val voiceEnd  = voiceBase + 24
+      
+      when(io.regWrite.payload.address >= voiceBase && io.regWrite.payload.address <= voiceEnd) {
+        val offset = io.regWrite.payload.address - voiceBase
 
-      // Frequency High (Trigger simultaneous atomic commit of High, Mid, and Low) (OSC_FREQ_HIGH)
-      is(U"8'x32") {
-        oscFreqHighReg := io.regWrite.payload.data
-        oscFreqMidReg  := oscFreqMidShadow
-        oscFreqLowReg  := oscFreqLowShadow
-      }
+        val voiceMappings = Seq(
+          VoiceRegisterOffsets.OSC_FREQ_LOW     -> voices(v).freqLowShadow,
+          VoiceRegisterOffsets.OSC_FREQ_MID     -> voices(v).freqMidShadow,
+          VoiceRegisterOffsets.OSC_WAVE_SEL     -> voices(v).oscWaveform,
+          VoiceRegisterOffsets.OSC_PWM_WIDTH    -> voices(v).oscPulseWidth,
+          VoiceRegisterOffsets.OSC_VOLUME       -> voices(v).oscVolume,
+          VoiceRegisterOffsets.ENV_CTRL          -> voices(v).envCtrl,
+          VoiceRegisterOffsets.ENV_ATTACK        -> voices(v).envAttack,
+          VoiceRegisterOffsets.ENV_DECAY         -> voices(v).envDecay,
+          VoiceRegisterOffsets.ENV_SUSTAIN       -> voices(v).envSustain,
+          VoiceRegisterOffsets.ENV_RELEASE       -> voices(v).envRelease,
+          VoiceRegisterOffsets.ENV_GATE          -> voices(v).envGate,
+          VoiceRegisterOffsets.FILTER_CTRL       -> voices(v).filterCtrl,
+          VoiceRegisterOffsets.FILTER_MODE       -> voices(v).filterMode,
+          VoiceRegisterOffsets.FILTER_CUTOFF     -> voices(v).filterCutoff,
+          VoiceRegisterOffsets.FILTER_RESONANCE  -> voices(v).filterRes
+        )
 
-      // Waveform (OSC_WAVE_SEL)
-      is(U"8'x33") {
-        oscWaveformReg := io.regWrite.payload.data
-      }
+        for ((off, reg) <- voiceMappings) {
+          when(offset === off) {
+            reg := io.regWrite.payload.data
+          }
+        }
 
-      // Pulse Width (OSC_PWM_WIDTH)
-      is(U"8'x34") {
-        oscPulseWidthReg := io.regWrite.payload.data
-      }
-
-      // Volume (OSC_VOLUME)
-      is(U"8'x35") {
-        oscVolumeReg := io.regWrite.payload.data
-      }
-
-      // Envelope Control (ENV_CTRL)
-      is(U"8'x40") {
-        envCtrlReg := io.regWrite.payload.data
-      }
-
-      // Envelope Attack (ENV_ATTACK)
-      is(U"8'x41") {
-        envAttackReg := io.regWrite.payload.data
-      }
-
-      // Envelope Decay (ENV_DECAY)
-      is(U"8'x42") {
-        envDecayReg := io.regWrite.payload.data
-      }
-
-      // Envelope Sustain (ENV_SUSTAIN)
-      is(U"8'x43") {
-        envSustainReg := io.regWrite.payload.data
-      }
-
-      // Envelope Release (ENV_RELEASE)
-      is(U"8'x44") {
-        envReleaseReg := io.regWrite.payload.data
-      }
-
-      // Envelope Gate (ENV_GATE)
-      is(U"8'x45") {
-        envGateReg := io.regWrite.payload.data
-      }
-
-      // Filter Control (FILTER_CTRL)
-      is(U"8'x50") {
-        filterCtrlReg := io.regWrite.payload.data
-      }
-
-      // Filter Mode (FILTER_MODE)
-      is(U"8'x51") {
-        filterModeReg := io.regWrite.payload.data
-      }
-
-      // Filter Cutoff (FILTER_CUTOFF)
-      is(U"8'x52") {
-        filterCutoffReg := io.regWrite.payload.data
-      }
-
-      // Filter Resonance (FILTER_RESONANCE)
-      is(U"8'x53") {
-        filterResReg := io.regWrite.payload.data
+        // Special atomic commit for frequency high byte
+        when(offset === VoiceRegisterOffsets.OSC_FREQ_HIGH) {
+          voices(v).oscFreqHigh := io.regWrite.payload.data
+          voices(v).oscFreqMid  := voices(v).freqMidShadow
+          voices(v).oscFreqLow  := voices(v).freqLowShadow
+        }
       }
     }
   }
 
   // --------------------------------------------------------------------------
-  // Frequency Assembly
+  // Output Synchronization (RegNext)
   // --------------------------------------------------------------------------
 
-  val oscFrequencyCombined = (oscFreqHighReg ## oscFreqMidReg ## oscFreqLowReg).asUInt
+  // Global Config Sync
+  io.synthConfig.mixerCtrl := RegNext(mixerCtrlReg) init(0)
 
-  // --------------------------------------------------------------------------
-  // One-Cycle Synchronization Stage
-  // --------------------------------------------------------------------------
+  // Voice Configs Sync
+  for (v <- 0 until numVoices) {
+    val oscCombinedFreq = (voices(v).oscFreqHigh ## voices(v).oscFreqMid ## voices(v).oscFreqLow).asUInt
+    
+    io.voiceConfig(v).osc.freqWord     := RegNext(oscCombinedFreq) init(0)
+    io.voiceConfig(v).osc.waveSelect   := RegNext(voices(v).oscWaveform.asUInt(2 downto 0)) init(0)
+    io.voiceConfig(v).osc.pwmWidth     := RegNext(voices(v).oscPulseWidth.asUInt) init(0)
+    io.voiceConfig(v).osc.volume       := RegNext(voices(v).oscVolume.asUInt) init(0)
 
-  // Synced oscillator registers
-  val syncedOscFreqWord        = RegNext(oscFrequencyCombined) init(0)
-  val syncedOscWaveSelect      = RegNext(oscWaveformReg.asUInt) init(0)
-  val syncedOscPwmWidth        = RegNext(oscPulseWidthReg.asUInt) init(0)
-  val syncedOscVolume          = RegNext(oscVolumeReg.asUInt) init(0)
+    io.voiceConfig(v).env.ctrl         := RegNext(voices(v).envCtrl) init(0)
+    io.voiceConfig(v).env.attack       := RegNext(voices(v).envAttack.asUInt) init(0)
+    io.voiceConfig(v).env.decay        := RegNext(voices(v).envDecay.asUInt) init(0)
+    io.voiceConfig(v).env.sustain      := RegNext(voices(v).envSustain.asUInt) init(0)
+    io.voiceConfig(v).env.release      := RegNext(voices(v).envRelease.asUInt) init(0)
+    io.voiceConfig(v).env.gate         := RegNext(voices(v).envGate) init(0)
 
-  // Synced envelope registers
-  val syncedEnvCtrl            = RegNext(envCtrlReg) init(0)
-  val syncedEnvAttack          = RegNext(envAttackReg.asUInt) init(0)
-  val syncedEnvDecay           = RegNext(envDecayReg.asUInt) init(0)
-  val syncedEnvSustain         = RegNext(envSustainReg.asUInt) init(0)
-  val syncedEnvRelease         = RegNext(envReleaseReg.asUInt) init(0)
-  val syncedEnvGate            = RegNext(envGateReg) init(0)
-
-  // Synced filter registers
-  val syncedFilterCtrl         = RegNext(filterCtrlReg) init(0)
-  val syncedFilterMode         = RegNext(filterModeReg.asUInt) init(0)
-  val syncedFilterCutoff       = RegNext(filterCutoffReg.asUInt) init(0)
-  val syncedFilterRes          = RegNext(filterResReg.asUInt) init(0)
-
-  // --------------------------------------------------------------------------
-  // Outputs
-  // --------------------------------------------------------------------------
-
-  io.voiceConfig.osc.freqWord     := syncedOscFreqWord
-  io.voiceConfig.osc.waveSelect   := syncedOscWaveSelect(2 downto 0)
-  io.voiceConfig.osc.pwmWidth     := syncedOscPwmWidth
-  io.voiceConfig.osc.volume       := syncedOscVolume
-
-  io.voiceConfig.env.ctrl         := syncedEnvCtrl
-  io.voiceConfig.env.attack       := syncedEnvAttack
-  io.voiceConfig.env.decay        := syncedEnvDecay
-  io.voiceConfig.env.sustain      := syncedEnvSustain
-  io.voiceConfig.env.release      := syncedEnvRelease
-  io.voiceConfig.env.gate         := syncedEnvGate
-
-  io.voiceConfig.filter.ctrl      := syncedFilterCtrl
-  io.voiceConfig.filter.mode      := syncedFilterMode(1 downto 0)
-  io.voiceConfig.filter.cutoff    := syncedFilterCutoff
-  io.voiceConfig.filter.resonance := syncedFilterRes
+    io.voiceConfig(v).filter.ctrl      := RegNext(voices(v).filterCtrl) init(0)
+    io.voiceConfig(v).filter.mode      := RegNext(voices(v).filterMode.asUInt(1 downto 0)) init(0)
+    io.voiceConfig(v).filter.cutoff    := RegNext(voices(v).filterCutoff.asUInt) init(0)
+    io.voiceConfig(v).filter.resonance := RegNext(voices(v).filterRes.asUInt) init(0)
+  }
 }

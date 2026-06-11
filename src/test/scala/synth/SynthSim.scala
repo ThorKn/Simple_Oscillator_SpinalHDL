@@ -55,38 +55,38 @@ class SynthSim extends AnyFunSuite {
 
       // 4. Inject Live Register Configuration over UART
       println("\nStreaming Configuration over UART RX:")
-      // Configure waveform: 0x02 -> PWM Waveform (address 0x33) (OSC_WAVE_SEL)
-      writeRegister(0x33, 0x02)
+      // Configure waveform: 0x02 -> PWM Waveform (address 0x18) (OSC_WAVE_SEL)
+      writeRegister(0x18, 0x02)
       
-      // Configure PWM width: 0x80 -> 50% Duty Cycle (address 0x34) (OSC_PWM_WIDTH)
-      writeRegister(0x34, 0x80)
+      // Configure PWM width: 0x80 -> 50% Duty Cycle (address 0x19) (OSC_PWM_WIDTH)
+      writeRegister(0x19, 0x80)
 
-      // Configure volume: 0xFF -> Max Master Volume (address 0x35) (OSC_VOLUME)
-      writeRegister(0x35, 0xFF)
+      // Configure volume: 0xFF -> Max Master Volume (address 0x1A) (OSC_VOLUME)
+      writeRegister(0x1A, 0xFF)
 
       // Configure Envelope Parameters:
-      // Enable envelope (disable bit 0 = 0) -> value = 0 (address 0x40)
-      writeRegister(0x40, 0x00)
-      // Gate ON (bit 0 = 1) -> value = 1 (address 0x45)
-      writeRegister(0x45, 0x01)
-      // Attack = 0 (fastest 0.5 ms rise) (address 0x41)
-      writeRegister(0x41, 0x00)
-      // Decay = 0 (address 0x42)
-      writeRegister(0x42, 0x00)
-      // Sustain = 128 (address 0x43)
-      writeRegister(0x43, 0x80)
+      // Enable envelope (disable bit 0 = 0) -> value = 0 (address 0x1D)
+      writeRegister(0x1D, 0x00)
+      // Gate ON (bit 0 = 1) -> value = 1 (address 0x22)
+      writeRegister(0x22, 0x01)
+      // Attack = 0 (fastest 0.5 ms rise) (address 0x1E)
+      writeRegister(0x1E, 0x00)
+      // Decay = 0 (address 0x1F)
+      writeRegister(0x1F, 0x00)
+      // Sustain = 128 (address 0x20)
+      writeRegister(0x20, 0x80)
 
       // Configure Filter Parameters:
-      // Enable filter (disable bit 0 = 0) -> value = 0 (address 0x50)
-      writeRegister(0x50, 0x00)
-      writeRegister(0x51, 0x00)
-      writeRegister(0x52, 0x80)
-      writeRegister(0x53, 0x00)
+      // Enable filter (disable bit 0 = 0) -> value = 0 (address 0x25)
+      writeRegister(0x25, 0x00)
+      writeRegister(0x26, 0x00)
+      writeRegister(0x27, 0x80)
+      writeRegister(0x28, 0x00)
 
       // Configure Frequency Tuning Word (0x080000) atomically to output a 15 kHz tone:
-      writeRegister(0x30, 0x00) // OSC_FREQ_LOW -> Stages
-      writeRegister(0x31, 0x00) // OSC_FREQ_MID -> Stages
-      writeRegister(0x32, 0x08) // OSC_FREQ_HIGH -> Commits entire word atomically!
+      writeRegister(0x15, 0x00) // OSC_FREQ_LOW -> Stages
+      writeRegister(0x16, 0x00) // OSC_FREQ_MID -> Stages
+      writeRegister(0x17, 0x08) // OSC_FREQ_HIGH -> Commits entire word atomically!
       println("UART Injection finished. Waiting for I2S output serialization...")
 
       // 5. Start the I2S Monitor Thread to capture the active outputs
@@ -202,29 +202,29 @@ class SynthSim extends AnyFunSuite {
       }
 
       // Enable both modules (disable = 0)
-      writeRegister(0x40, 0x00)
-      writeRegister(0x50, 0x00)
+      writeRegister(0x1D, 0x00)
+      writeRegister(0x25, 0x00)
       
       // Configure envelope gate ON to run it
-      writeRegister(0x45, 0x01)
+      writeRegister(0x22, 0x01)
 
       // 1. Verify ENVELOPE BYPASS
       // Initially not bypassed, volume should follow envelope shaper output (starts at 0)
       sleep(1000)
       assert(dut.core.voice.envAttenuator.io.volume.toInt < 1023, "Initially envelope volume should be modulated and start low")
 
-      // Enable Envelope Bypass: write 0x02 to ENV_CTRL (0x40) (bit 1 is bypass)
+      // Enable Envelope Bypass: write 0x02 to ENV_CTRL (0x1D) (bit 1 is bypass)
       println("Enabling Envelope Bypass...")
-      writeRegister(0x40, 0x02)
+      writeRegister(0x1D, 0x02)
       sleep(1000)
       // Check that the envelope volume is locked to 1023
       assert(dut.core.voice.envAttenuator.io.volume.toInt == 1023, s"Envelope volume should be locked to 1023 when bypassed, got ${dut.core.voice.envAttenuator.io.volume.toInt}")
 
       // 2. Verify FILTER BYPASS
-      // Initially not bypassed (FILTER_CTRL = 0x00), so filter is active
-      // Enable Filter Bypass: write 0x02 to FILTER_CTRL (0x50) (bit 1 is bypass)
+      // Initially not bypassed (FILTER_CTRL = 0x25), so filter is active
+      // Enable Filter Bypass: write 0x02 to FILTER_CTRL (0x25) (bit 1 is bypass)
       println("Enabling Filter Bypass...")
-      writeRegister(0x50, 0x02)
+      writeRegister(0x25, 0x02)
       
       // Run some cycles and verify that whenever decimator sampleIn is valid, its payload matches attenuator sampleOut payload
       var matchedSamples = 0
