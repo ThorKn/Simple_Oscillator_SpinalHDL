@@ -15,6 +15,7 @@
    - 1.10 ParameterMapper Unit Test (`ParameterMapperSim`)
    - 1.11 FilterCore Unit Test (`FilterCoreSim`)
    - 1.12 FilterMux Unit Test (`FilterMuxSim`)
+   - 1.13 Mixer Unit Test (`MixerSim`)
 2. Integration Tests
    - 2.1 Complete System Integration Test (`SynthSim`)
    - 2.2 Complete Envelope Generator Integration Test (`EnvelopeGeneratorSim`)
@@ -107,56 +108,53 @@ Verifies the custom DSP volume attenuator module (`Attenuator`) across default 8
 ## 1.2 Register Bank Unit Test (`RegisterBankSim`)
 
 ### Purpose
-Verifies the parameter storage register bank module (`RegisterBank`) for reset defaults, single-byte register updates, and atomic 24-bit frequency word commitment.
+Verifies the parameter storage register bank module (`RegisterBank`) for reset defaults, single-byte register updates, dynamic voice-specific address decoding, multi-voice parameter isolation, and atomic 24-bit frequency commitment.
 
 ### Simulated Environment
-* **Component Under Test**: `RegisterBank`
+* **Component Under Test**: `RegisterBank` (instantiated with `numVoices = 2` for testing)
 * **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
 * **Reset**: Asynchronous, Active-High.
 
 ### Input Stimulus & Signals
 * `io.regWrite`: `Flow[RegisterWrite]` (containing 8-bit `address` and 8-bit `data`)
-* `io.oscConfig`: `OscConfig` (output bundle containing `freqWord`, `waveSelect`, `pwmWidth`, `volume`)
-* `io.envConfig`: `EnvelopeConfig` (output bundle containing `ctrl`, `attack`, `decay`, `sustain`, `release`, `gate`)
+* `io.synthConfig`: `SynthConfig` (output bundle containing global `mixerCtrl`)
+* `io.voiceConfig`: `Vec(VoiceConfig(), numVoices)` (vector of configuration bundles containing `osc`, `env`, and `filter` config fields)
 
 ### Test Cases
 
-####  1.2.1 Reset Defaults
+#### 1.2.1 Reset Defaults
 * **Action**: Start simulation with reset asserted.
-* **Assertion**: Verify that all output configuration fields in both `io.oscConfig` and `io.envConfig` are held strictly at `0`.
+* **Assertion**: Verify that all output configuration fields in `io.synthConfig` and all fields in `io.voiceConfig(0)` / `io.voiceConfig(1)` are held strictly at `0`.
 
-####  1.2.2 Single-Byte Direct Updates
-* **Action**: Write individually to non-atomic registers using the `io.regWrite` port:
-  - Write `0x03` (address `0x33` - `OSC_WAVE_SEL`)
-  - Write `0xA5` (address `0x34` - `OSC_PWM_WIDTH`)
-  - Write `0x7F` (address `0x35` - `OSC_VOLUME`)
-* **Assertion**: Verify that the corresponding output fields (`oscConfig.waveSelect`, `oscConfig.pwmWidth`, and `oscConfig.volume`) are updated to the written values on the next clock cycle.
+#### 1.2.2 Global Configuration Register Updates
+* **Action**: Write `0x03` to address `0x00` (`MIXER_CTRL`) using `io.regWrite`.
+* **Assertion**: Verify that `io.synthConfig.mixerCtrl` is updated to `0x03` on the next clock cycle.
 
-####  1.2.3 Atomic 24-Bit Frequency Commitment
-* **Action**: Perform a sequential write sequence to verify shadow staging and atomic trigger commitment:
-  - Write `0x55` to `0x30` (`OSC_FREQ_LOW`).
-    * *Assertion*: Verify that `oscConfig.freqWord` remains unchanged (stages in shadow register).
-  - Write `0xAA` to `0x31` (`OSC_FREQ_MID`).
-    * *Assertion*: Verify that `oscConfig.freqWord` remains unchanged (stages in shadow register).
-  - Write `0x0C` to `0x32` (`OSC_FREQ_HIGH`).
-    * *Assertion*: Verify that on the next clock cycle, the active output `oscConfig.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
+#### 1.2.3 Single-Byte Direct Updates
+* **Action**: Write individually to non-atomic registers of specific voices using the `io.regWrite` port:
+  - Write `0x03` to address `0x18` (`OSC_WAVE_SEL` of Voice 0)
+  - Write `0x7F` to address `0x1A` (`OSC_VOLUME` of Voice 0)
+  - Write `0x01` to address `0x38` (`OSC_WAVE_SEL` of Voice 1)
+  - Write `0x3F` to address `0x3A` (`OSC_VOLUME` of Voice 1)
+* **Assertion**: Verify that on the next clock cycle:
+  - `voiceConfig(0).osc.waveSelect` = `3`, `voiceConfig(0).osc.volume` = `0x7F`.
+  - `voiceConfig(1).osc.waveSelect` = `1`, `voiceConfig(1).osc.volume` = `0x3F`.
 
-####  1.2.4 Envelope Parameter Updates
-* **Action**: Write individually to all six envelope registers using `io.regWrite`:
-  - Write `0x15` to `0x40` (`ENV_CTRL`)
-  - Write `0x0A` to `0x41` (`ENV_ATTACK`)
-  - Write `0x1F` to `0x42` (`ENV_DECAY`)
-  - Write `0x80` to `0x43` (`ENV_SUSTAIN`)
-  - Write `0x2C` to `0x44` (`ENV_RELEASE`)
-  - Write `0x01` to `0x45` (`ENV_GATE`)
-* **Assertion**: Verify that the corresponding output fields in `io.envConfig` (`ctrl`, `attack`, `decay`, `sustain`, `release`, `gate`) are updated to the written values on the next clock cycle.
+#### 1.2.4 Atomic 24-Bit Frequency Commitment
+* **Action**: Perform a sequential write sequence to verify shadow staging and atomic trigger commitment per voice:
+  - Write `0x55` to address `0x15` (`OSC_FREQ_LOW` of Voice 0).
+    * *Assertion*: Verify that `voiceConfig(0).osc.freqWord` remains unchanged.
+  - Write `0xAA` to address `0x16` (`OSC_FREQ_MID` of Voice 0).
+    * *Assertion*: Verify that `voiceConfig(0).osc.freqWord` remains unchanged.
+  - Write `0x0C` to address `0x17` (`OSC_FREQ_HIGH` of Voice 0).
+    * *Assertion*: Verify that on the next clock cycle, the active output `voiceConfig(0).osc.freqWord` updates atomically to `0x0CAA55` (`830037` in decimal) all at once.
 
-####  1.2.5 Address Crosstalk & Channel Isolation
-* **Action**: Perform crosstalk validation across register regions:
-  1. Write arbitrary values to all oscillator registers (`0x30` through `0x35`).
-     * *Assertion*: Verify that all envelope fields in `io.envConfig` remain completely unchanged.
-  2. Write arbitrary values to all envelope registers (`0x40` through `0x45`).
-     * *Assertion*: Verify that all oscillator fields in `io.oscConfig` remain completely unchanged.
+#### 1.2.5 Multi-Voice Address Crosstalk & Isolation
+* **Action**: Perform crosstalk validation across separate voice regions:
+  1. Write arbitrary values to all Voice 0 configuration registers (addresses `0x10` through `0x28`).
+     * *Assertion*: Verify that all configuration fields in `io.voiceConfig(1)` remain completely unchanged (held at 0).
+  2. Write arbitrary values to all Voice 1 configuration registers (addresses `0x30` through `0x48`).
+     * *Assertion*: Verify that all configuration fields in `io.voiceConfig(0)` remain completely unchanged.
 
 ---
 
@@ -183,19 +181,19 @@ Verifies the FSM protocol parser (`UartProtocolDecoder`) for reset safety, succe
 ####  1.3.2 Valid Command Framing (3-Byte Stream)
 * **Action**: Push three bytes back-to-back:
   - Byte 1: `0x01` (WriteRegister command)
-  - Byte 2: `0x32` (`FREQ_HIGH` address)
+  - Byte 2: `0x17` (`OSC_FREQ_HIGH` address of Voice 0)
   - Byte 3: `0xAB` (Register data payload)
 * **Assertion**: Verify that:
   - `regWrite.valid` is `False` after Byte 1 and Byte 2.
-  - `regWrite.valid` is `True` in the exact cycle Byte 3 is pushed, and its payload contains `address = 0x32` and `data = 0xAB`.
+  - `regWrite.valid` is `True` in the exact cycle Byte 3 is pushed, and its payload contains `address = 0x17` and `data = 0xAB`.
   - `regWrite.valid` drops back to `False` in the following cycle.
 
 ####  1.3.3 Byte-Spacing Delay Tolerance
 * **Action**: Push a 3-byte transaction with arbitrary timing spacing to simulate slow UART transmissions:
   - Push Byte 1 (`0x01`), then wait 25 clock cycles.
-  - Push Byte 2 (`0x35` - `VOLUME`), then wait 50 clock cycles.
+  - Push Byte 2 (`0x1A` - `OSC_VOLUME` of Voice 0), then wait 50 clock cycles.
   - Push Byte 3 (`0x7F`), then wait 1 clock cycle.
-* **Assertion**: Verify that the FSM maintains state synchronization, and atomically asserts `regWrite.valid = True` with `address = 0x35` and `data = 0x7F` exactly when Byte 3 is pushed.
+* **Assertion**: Verify that the FSM maintains state synchronization, and atomically asserts `regWrite.valid = True` with `address = 0x1A` and `data = 0x7F` exactly when Byte 3 is pushed.
 
 ---
 
@@ -562,6 +560,48 @@ Verifies output response selection, resizing, and saturating clamp behavior of t
 * **Action**: Drive inputs exceeding 16-bit signed boundaries (e.g. `0x123456` or `-0x154321`).
 * **Assertion**: Verify that values above `32767` saturate to `32767` and values below `-32768` saturate to `-32768` instead of performing wrap-around truncation.
 
+## 1.13 Mixer Unit Test (`MixerSim`)
+
+### Purpose
+Verifies the Master Mixer module (`Mixer`) for reset safety, summing accuracy, saturating clamping, active-low muting, and timing propagation.
+
+### Simulated Environment
+* **Component Under Test**: `Mixer` (instantiated with `numVoices = 3` for testing)
+* **Clock Domain**: 24 MHz master clock (simulation period = 10 units).
+* **Reset**: Asynchronous, Active-High.
+
+### Input Stimulus & Signals
+* `io.inputs`: `Vec(slave(Flow(SInt(16 bits))), numVoices)`
+* `io.mixerCtrl`: `Bits(8 bits)`
+* `io.phaseTick`: `Bool`
+* `io.sampleOut`: `Flow[SInt]` (16 bits)
+
+### Test Cases
+
+#### 1.13.1 Reset Stability
+* **Action**: Assert reset high for 5 clock cycles while driving random values on `io.inputs` and `io.mixerCtrl`.
+* **Assertion**: Verify that `io.sampleOut.payload` is strictly held at `0` and `io.sampleOut.valid` is strictly `False`.
+
+#### 1.13.2 Summing Accuracy (No Clipping)
+* **Action**: Set `mixerCtrl = 0x00` (all voices un-muted). Drive `inputs(0) = 5000`, `inputs(1) = -2000`, `inputs(2) = 1000` with all flow valids set to `True`. Pulse `phaseTick` high.
+* **Assertion**: Verify that on the next `phaseTick` edge:
+  - `sampleOut.valid` is `True`.
+  - `sampleOut.payload` is exactly `4000`.
+
+#### 1.13.3 Positive & Negative Saturation Clamping
+* **Action**: Drive inputs to exceed 16-bit signed boundaries:
+  - Positive: `inputs(0) = 20000`, `inputs(1) = 15000`, `inputs(2) = 10000` (sum = 45000).
+  - Negative: `inputs(0) = -20000`, `inputs(1) = -15000`, `inputs(2) = -10000` (sum = -45000).
+* **Assertion**: Verify that the output payload clamps strictly to `32767` for the positive case, and `-32768` for the negative case, with zero wrap-around distortion.
+
+#### 1.13.4 Active-Low Mute Masking
+* **Action**: Set `mixerCtrl = 0x02` (voice 1 muted). Drive `inputs(0) = 10000`, `inputs(1) = 20000`, `inputs(2) = 5000`. Pulse `phaseTick` high.
+* **Assertion**: Verify that the output payload is exactly `15000`, ignoring the contribution of voice 1.
+
+#### 1.13.5 Gated Output Validity
+* **Action**: Drive inputs with valid flows. Keep `phaseTick` low.
+* **Assertion**: Verify that `sampleOut.valid` remains strictly `False` until `phaseTick` is asserted.
+
 ---
 
 #  2. Integration Tests
@@ -595,14 +635,14 @@ Verifies the end-to-end synthesizer system (`Synth`) for seamless hardware modul
 
 ####  2.1.2 Real-time UART Parameter Modulation
 * **Action**: Stream a live byte sequence over the `uartRx` line at 115200 Baud (208 master cycles per bit) to dynamically configure the synthesizer:
-  1. Write `0x02` (PWM mode) to Waveform Select (`0x33`).
-  2. Write `0x80` (50% Duty cycle) to PWM Width (`0x34`).
-  3. Write `0xFF` (Max Volume) to Volume (`0x35`).
-  4. Write `0x03` (Enable Envelope + Gate ON) to Envelope Control (`0x40`).
-  5. Write `0x00` (Attack = 0) to Envelope Attack (`0x41`).
-  6. Write `0x00` (Decay = 0) to Envelope Decay (`0x42`).
-  7. Write `0x80` (Sustain = 128) to Envelope Sustain (`0x43`).
-  8. Write atomic DDS Frequency tuning word `0x080000` (Low = `0x30`, Mid = `0x31`, High = `0x32` commit to target $15\text{ kHz}$).
+  1. Write `0x02` (PWM mode) to Waveform Select (`0x18` - Voice 0 `OSC_WAVE_SEL`).
+  2. Write `0x80` (50% Duty cycle) to PWM Width (`0x19` - Voice 0 `OSC_PWM_WIDTH`).
+  3. Write `0xFF` (Max Volume) to Volume (`0x1A` - Voice 0 `OSC_VOLUME`).
+  4. Write `0x03` (Enable Envelope + Gate ON) to Envelope Control (`0x1D` - Voice 0 `ENV_CTRL`).
+  5. Write `0x00` (Attack = 0) to Envelope Attack (`0x1E` - Voice 0 `ENV_ATTACK`).
+  6. Write `0x00` (Decay = 0) to Envelope Decay (`0x1F` - Voice 0 `ENV_DECAY`).
+  7. Write `0x80` (Sustain = 128) to Envelope Sustain (`0x20` - Voice 0 `ENV_SUSTAIN`).
+  8. Write atomic DDS Frequency tuning word `0x080000` (Low = `0x15`, Mid = `0x16`, High = `0x17` commit to target $15\text{ kHz}$ for Voice 0).
 * **Assertion**: Capture 25 I2S frames and verify:
   - **Stereo Alignment**: Left and Right samples are perfectly identical for all frames. The testbench monitor skips Slot 0 at startup to correctly align with the continuous 32-bit frame structure where the LSB of the previous word is transmitted in Slot 0/16.
   - **Dynamic Audio Response & Envelope Modulation**: Outputs are no longer silent, and sample amplitudes scale dynamically bound under the active ADSR envelope within maximum absolute peaks (`<= 32609`), with absolute values scaling up successfully over time (`> 5000`).

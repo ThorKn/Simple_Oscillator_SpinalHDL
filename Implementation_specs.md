@@ -63,27 +63,30 @@ spinalSynth/
 │   │           │   ├── UartRx.scala              # UART Receiver
 │   │           │   ├── UartProtocolDecoder.scala # Protocol Parser
 │   │           │   └── RegisterBank.scala        # Parameter Storage
-│   │           ├── oscillator/             # Core Oscillator logic (per Section 4)
+│   │           ├── voice/                  # Voice Component Wrapper
+│   │           │   └── Voice.scala             # Coordinator wrapper module (per Section 7)
+│   │           ├── oscillator/             # Core Oscillator logic (per Section 8)
 │   │           │   ├── Oscillator.scala    # Main Oscillator module
 │   │           │   ├── OscAccumulator.scala # Phase logic
 │   │           │   ├── OscNoise.scala      # LFSR logic
 │   │           │   ├── OscGenerators.scala # Waveform logic (Saw, Tri, etc.)
 │   │           │   └── OscMux.scala        # Waveform selection
 │   │           ├── envelope/               # Envelope Generator logic
-│   │           │   ├── EnvelopeGenerator.scala   # Coordinator wrapper module
+│   │           │   ├── EnvelopeGenerator.scala   # Coordinator wrapper module (per Section 9)
 │   │           │   ├── EnvelopeCtrl.scala        # Control FSM & LUT logic
 │   │           │   ├── EnvelopeAccumulator.scala # Phase accumulator logic
 │   │           │   └── EnvelopeShaper.scala      # Waveshaper & interpolation logic
 │   │           ├── mixing/                 # Audio processing
-│   │           │   └── Attenuator.scala    # Volume Control module (per Section 8)
-│   │           ├── filter/                 # State Variable Filter (SVF) (per Section 8)
+│   │           │   ├── Attenuator.scala    # Volume Control module (per Section 10)
+│   │           │   └── Mixer.scala         # Master Mixer summing module (per Section 12)
+│   │           ├── filter/                 # State Variable Filter (SVF) (per Section 11)
 │   │           │   ├── SVF.scala           # Filter Top-Level wrapper
 │   │           │   ├── ParameterMapper.scala # Exp and quadratic LUT maps
 │   │           │   ├── FilterCore.scala    # FSM arithmetic sequencer
 │   │           │   └── FilterMux.scala     # Output selection & saturation
 │   │           ├── output/                 # Audio output pipeline
-│   │           │   ├── Decimator.scala     # 10x downsampling (per Section 5)
-│   │           │   └── I2STransmitter.scala # I2S protocol engine (per Section 6)
+│   │           │   ├── Decimator.scala     # 10x downsampling (per Section 13)
+│   │           │   └── I2STransmitter.scala # I2S protocol engine (per Section 15)
 ```
 
 ```text
@@ -96,6 +99,8 @@ spinalSynth/
 │               ├── uart/
 │               │   ├── RegisterBankSim.scala        # Verifying parameter storage
 │               │   └── UartProtocolDecoderSim.scala # Verifying protocol parsing
+│               ├── voice/
+│               │   └── VoiceSim.scala          # Verifying Voice coordinator
 │               ├── oscillator/
 │               │   └── OscGeneratorsSim.scala # Verifying Generator math
 │               ├── envelope/
@@ -104,7 +109,8 @@ spinalSynth/
 │               │   ├── EnvelopeShaperSim.scala      # Verifying waveshaping & sustain
 │               │   └── EnvelopeGeneratorSim.scala   # Verifying full integration ADSR
 │               ├── mixing/
-│               │   └── AttenuatorSim.scala # Verifying Attenuator scaling
+│               │   ├── AttenuatorSim.scala     # Verifying Attenuator scaling
+│               │   └── MixerSim.scala          # Verifying multi-voice summing/saturation
 │               └── output/
 │                   └── I2STransmitterSim.scala # Verifying I2S timing/protocol
 ├── rtl/                        # Output folder for generated Verilog/VHDL files
@@ -124,11 +130,12 @@ The module shall:
 - Instantiate unified UART Subsystem Wrapper (`Uart`)
 - Instantiate the Synthesis, Modulation & Mixing Engine:
   - `TimingGenerator`: Generates clock-enable heartbeats (`phaseTick` and `sampleTick`).
-  - `Oscillator`: Core DDS multi-waveform generation.
-  - `EnvelopeGenerator`: Core dynamic ADSR waveshaper.
-  - `envAttenuator` (10-bit `Attenuator`): Modulates sample volume dynamically via the envelope generator output. Features envelope bypass logic: if envelope bypass (`ENV_CTRL` bit 1) is `1`, a constant maximum `1023` volume is applied.
-  - `attenuator` (8-bit `Attenuator`): Manages final master volume scaling.
-  - `Decimator`: Downsamples the 480 kHz audio sample stream to 48 kHz.
+  - `Voice`: Multiple independent voice coordinator wrapper instances, generated dynamically using a parameterized loop:
+    ```scala
+    val voices = Seq.tabulate(numVoices)(v => new Voice())
+    ```
+  - `Mixer`: Sums the outputs of all voice modules into a single 480 kHz mono audio stream under the control of the `mixerCtrl` byte register, applying manual saturating clamping.
+  - `Decimator`: Downsamples the mixed 480 kHz audio sample stream to 48 kHz.
   - `I2STransmitter`: Serializes parallel audio samples into a stereo I2S bitstream.
 - **Clock & Reset Distribution**: Run all submodules synchronously inside a single 24 MHz clocking area with asynchronous active-high reset active.
 - **Natural Pipeline Delay & Flow Handshaking**: All audio modules interface using `Flow` (valid/payload) handshakes. Signals propagate timing information naturally. The `svf` module's FSM sequencer is driven directly by `timingGen.io.phaseTick` (480 kHz), and the `Decimator` downsampling is driven directly by `timingGen.io.sampleTick` (48 kHz) without requiring artificial alignment delay registers.
@@ -244,27 +251,82 @@ val io = new Bundle {
 
 ## 4.3 RegisterBank
 
-**Purpose:** Stores the current state of the synthesizer parameters. It implements an atomic update for the 24-bit frequency word, ensuring all three bytes are applied simultaneously to the DDS engine upon writing to the high-byte address.
+**Purpose:** Stores and synchronizes the current state of both global parameters and voice-specific parameters.
 
-### Atomic Write Staging Mechanism
-To prevent audibly jarring sweep glitches or frequency artifacts, the multi-byte frequency configuration transitions atomically:
-- **`OSC_FREQ_LOW` (`0x30`)**: Staged into a temporary staging register `oscFreqLowShadow`.
-- **`OSC_FREQ_MID` (`0x31`)**: Staged into a temporary staging register `oscFreqMidShadow`.
-- **`OSC_FREQ_HIGH` (`0x32`)**: Directly commits the newly written high byte (`oscFreqHighReg`) and transfers both staged shadow registers (`oscFreqMidReg := oscFreqMidShadow`, `oscFreqLowReg := oscFreqLowShadow`) to the active registers simultaneously on a single clock edge.
+### Multi-Voice Register Address Decoding
+The RegisterBank uses a parameterized address-decoding logic based on loop generation in Scala:
+1. **Global Configuration Range (`0x00` to `0x0F`)**:
+   Addresses are mapped directly to global registers (e.g., `mixerCtrlReg` at `0x00`).
+2. **Voice Configuration Range (`0x10` onwards)**:
+   Each voice is allocated a 32-byte window starting at `0x10`. The address decoding evaluates which voice's base window is active:
+   ```scala
+   val voiceBase = 0x10 + (v * 0x20)
+   val voiceEnd  = voiceBase + 24
+   ```
+   If the target address falls in this range, the decoder extracts the relative offset:
+   ```scala
+   val offset = address - voiceBase
+   ```
+   This relative offset is then decoded using a lookup mapping to update the active registers of voice `v`.
+
+### Per-Voice Atomic Write Staging Mechanism
+To prevent audibly jarring sweep glitches or frequency artifacts, the multi-byte frequency configuration transitions atomically per voice:
+* **`OSC_FREQ_LOW` (Offset `0x05`)**: Staged into a voice-isolated staging register `freqLowShadow`.
+* **`OSC_FREQ_MID` (Offset `0x06`)**: Staged into a voice-isolated staging register `freqMidShadow`.
+* **`OSC_FREQ_HIGH` (Offset `0x07`)**: Directly commits the newly written high byte and transfers both staged shadow registers to the active frequency register block (`oscFreqHigh`, `oscFreqMid`, and `oscFreqLow`) simultaneously on a single clock edge.
 
 ### IO Bundle
 
 ```scala
 val io = new Bundle {
-    val regWrite  = slave(Flow(RegisterWrite()))
-    val oscConfig = out(OscConfig())
-    val envConfig = out(EnvelopeConfig())
+  val regWrite    = slave(Flow(RegisterWrite()))
+  val synthConfig = out(SynthConfig())
+  val voiceConfig = Vec(out(VoiceConfig()), numVoices)
 }
 ```
 
+# 5. Voice Component
+
+The **Voice** wrapper class coordinates the audio signal generation and modulation chain for an individual independent voice.
+
+### IO Bundle
+
+```scala
+val io = new Bundle {
+  val phaseTick = in Bool()                 // 480 kHz processing strobe
+  val syncIn    = in Bool()                 // Hard sync trigger input
+  val config    = in(VoiceConfig())         // Configuration bundle (Osc, Env, Filter)
+  val sampleOut = out(Flow(SInt(16 bits)))  // Main voice audio output flow
+}
+```
+
+### Coordinator Submodules
+Each voice instantiates the following DSP modules:
+1. `osc`: `Oscillator` DDS engine generating raw waveform flows.
+2. `envGen`: `EnvelopeGenerator` creating unipolar ADSR modulation levels.
+3. `envAttenuator`: `Attenuator(volumeWidth = 10)` scaling raw oscillator samples by the 10-bit envelope signal.
+4. `attenuator`: `Attenuator(volumeWidth = 8)` scaling samples by the static 8-bit voice volume.
+5. `svf`: `SVF` State Variable Filter filtering the scaled voice samples.
+
+### Signal Connection & Routing Logic
+1. **Clock-Enable Distribution**: `phaseTick` is distributed to all submodules to advance their internal states.
+2. **Hard-Sync Routing**: `syncIn` drives `envGen.io.syncIn`.
+3. **Configuration Bundling**: `config.osc`, `config.env`, and `config.filter` bundles map directly to their corresponding submodules.
+4. **Envelope Volume Routing**:
+   - The envelope bypass flag is evaluated from `io.config.env.ctrl(1)`.
+   - If bypass is active, `envAttenuator.io.volume` is clamped to constant full volume `1023`.
+   - Otherwise, `envAttenuator.io.volume` is driven by the dynamic `envGen.io.envelopeOut.payload`.
+5. **DSP Audio Signal Chain**:
+   - `osc.io.sample` is routed to `envAttenuator.io.sampleIn`.
+   - `envAttenuator.io.sampleOut` is routed to `attenuator.io.sampleIn`.
+   - `attenuator.io.sampleOut` is routed to `svf.io.sampleIn`.
+   - The filter bypass flag is evaluated from `io.config.filter.ctrl(1)`.
+   - If filter bypass is active, the final `io.sampleOut` is routed directly from `attenuator.io.sampleOut`.
+   - Otherwise, `io.sampleOut` is routed from the output of the filter `svf.io.sampleOut`.
+
 ---
 
-# 5. Oscillator
+# 6. Oscillator
 
 The Oscillator package connects the four submodules, as shown in the following package structure. It serves as an abstraction layer above the generation of the oscillating audio signals.
 
@@ -301,7 +363,7 @@ val io = new Bundle {
 ```
 
 
-## 5.1 Oscillator Submodules
+## 6.1 Oscillator Submodules
 
 ### OscAccumulator
 
@@ -370,7 +432,7 @@ val io = new Bundle {
 }
 ```
 
-## 5.2 Oscillator signal flow
+## 6.2 Oscillator signal flow
 
 ```text
 OscAccumulator ── phase ──┐
@@ -392,9 +454,9 @@ OscNoise ── noiseSample ───┘
 
 ---
 
-# 6. Envelope Generator
+# 7. Envelope Generator
 
-## 6.1 EnvelopeGenerator (Top-Level Wrapper)
+## 7.1 EnvelopeGenerator (Top-Level Wrapper)
 
 ### Purpose
 The `EnvelopeGenerator` top-level wrapper acts as the coordinator. It encapsulates the three core submodules (`EnvelopeCtrl`, `EnvelopeAccumulator`, and `EnvelopeShaper`), binds them together, registers parameters to the global register map, and packages the outputs into a synced flow rate.
@@ -448,7 +510,7 @@ The wrapper instantiates the submodules and wires their control signals. The out
   io.envelopeOutSigned <> shaper.io.envelopeOutSigned
 ```
 
-## 6.2 EnvelopeCtrl
+## 7.2 EnvelopeCtrl
 
 ### Purpose
 The `EnvelopeCtrl` submodule serves as the "brain". It is responsible for parsing control registers, driving the ADSR playback state machine, computing direction and synchronization triggers, and fetching stage-appropriate increment values from a static lookup table.
@@ -529,7 +591,7 @@ val lutContent = for (p <- 0 until 256) yield {
 val rom = Mem(UInt(22 bits), 256) init(lutContent)
 ```
 
-## 6.3 EnvelopeAccumulator
+## 7.3 EnvelopeAccumulator
 
 ### Purpose
 The `EnvelopeAccumulator` is a high-speed 32-bit digital register that acts as the phase counter. It increments (or decrements) on every 24 MHz system clock cycle when enabled, driving the envelope's progress through time.
@@ -570,7 +632,7 @@ class EnvelopeAccumulator extends Component {
   * In **Release (Stage 4)**, completion is hit when the accum register underflows (`baseIndex` reaching `0`).
   * `segmentDone := isAttackDone || isDecayDone || isReleaseDone`
 
-## 6.4 EnvelopeShaper
+## 7.4 EnvelopeShaper
 
 ### Purpose
 The `EnvelopeShaper` transforms the raw, linear accumulator output into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
@@ -663,7 +725,7 @@ val finalValUnipolar = interp.asUInt.resize(10 bits)
   io.envelopeOutSigned.valid := io.phaseTick
   ```
 
-## 6.5 Signal Flow & Pipeline Timing
+## 7.5 Signal Flow & Pipeline Timing
 
 To ensure hardware timing closure at 24 MHz and robust, glitch-free control transitions, the Envelope Generator architecture isolates data lookup, mathematical computation, and control registers into dedicated synchronous pipeline stages.
 
@@ -690,7 +752,7 @@ The design implements two distinct hardware signal chains:
                +-------------------------------------------------+
 ```
 
-### 6.5.1 Chain 1: Control Input Propagation (`syncIn`, `Gate` -> Accumulator)
+### 7.5.1 Chain 1: Control Input Propagation (`syncIn`, `Gate` -> Accumulator)
 This path synchronizes asynchronous external controls and propagates internal register signals to steer the accumulator:
 * **External Sync Input (`syncIn`):** Connects to a standard 2-stage flip-flop synchronizer clocked at 24 MHz to prevent metastability.
   * *Latency:* **2 clock cycles** (synchronization penalty).
@@ -698,7 +760,7 @@ This path synchronizes asynchronous external controls and propagates internal re
 * **State Updates:** The FSM processes inputs combinationally and issues `resetAccum` or `runAccum` control registers to the accumulator on the next cycle.
   * *Total Control Latency:* **3 clock cycles** for `syncIn`, **1 clock cycle** for register-driven gate triggers.
 
-### 6.5.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
+### 7.5.2 Chain 2: Forward Lookup Math Pipeline (Accumulator -> Output)
 This is the core mathematical flow designed to maintain a 24 MHz clock cycle bound through registered cells:
 * **T0 (Accumulation Stage):** The 32-bit register `accum` increments (or decrements) by `phaseInc`. The split base index and fraction bits are output stable.
 * **T1 (ROM Lookup Stage):** The 8-bit index addresses the dual boundary ports `LUT[x]` and `LUT[x+1]`. The memory array lookup requires **1 clock cycle** to fetch and settle output registers.
@@ -708,7 +770,7 @@ This is the core mathematical flow designed to maintain a 24 MHz clock cycle bou
 
 ---
 
-# 7. Attenuator
+# 8. Attenuator
 
 ### Purpose
 Applies volume scaling and attenuation dynamically on the oversampled 480 kHz audio sample stream.
@@ -742,9 +804,9 @@ To prevent sign-bit alignment errors during dynamic multiplication:
 
 ---
 
-# 8. State Variable Filter (SVF)
+# 9. State Variable Filter (SVF)
 
-## 8.1 SVF (Top-Level Wrapper)
+## 9.1 SVF (Top-Level Wrapper)
 
 ### Purpose
 The `SVF` top-level wrapper acts as the coordinator. It encapsulates the three submodules (`ParameterMapper`, `FilterCore`, and `FilterMux`), binds them together, registers parameters to the global register map, and coordinates the clock-gated flow of audio samples.
@@ -767,7 +829,7 @@ The top-level wrapper instantiates the submodules, handles parameter conversion,
 
 ---
 
-## 8.2 ParameterMapper
+## 9.2 ParameterMapper
 
 ### Purpose
 The `ParameterMapper` converts user-facing 8-bit parameters into high-precision coefficients used by the Chamberlin SVF equations.
@@ -796,7 +858,7 @@ class ParameterMapper extends Component {
 
 ---
 
-## 8.3 FilterCore
+## 9.3 FilterCore
 
 ### Purpose
 The `FilterCore` implements the core Chamberlin fixed-point arithmetic loops. Rather than implementing parallel arithmetic logic, it uses a **time-multiplexed shared architecture** with exactly **one multiplier** and **one adder/subtractor** to save hardware resource area. The calculation steps are scheduled over multiple clock cycles within the 50-cycle sample frame budget.
@@ -842,7 +904,7 @@ When `clear` is asserted, FSM resets to `IDLE` and internal state registers (`lp
 
 ---
 
-## 8.4 FilterMux
+## 9.4 FilterMux
 
 ### Purpose
 The `FilterMux` selects the appropriate response based on the filter mode and scales/resizes the internal 24-bit representation back to the 16-bit output using saturating logic.
@@ -877,7 +939,7 @@ This preserves the internal 8-bit headroom in the 24-bit FSM registers (`lpReg`,
 
 ---
 
-## 8.5 Register Map Integration
+## 9.5 Register Map Integration
 
 The register space for the Filter Module is allocated at addresses `0x50` to `0x53`:
 
@@ -892,7 +954,7 @@ The `RegisterBank` will commit updates to these registers on the main clock doma
 
 ---
 
-## 8.6 Signal Flow & Pipeline Timing
+## 9.6 Signal Flow & Pipeline Timing
 
 ```text
                +-----------------+
@@ -924,9 +986,49 @@ The filter operations are executed sequentially by the FSM. Once calculations ar
 
 On the next incoming `phaseTick` pulse, the top-level wrapper asserts the output `sampleOut.valid` and drives the payload. This introduces a latency of exactly **1 sample period** (50 system clock cycles) between the input and output flows. Since the output `valid` is aligned to the 480 kHz `phaseTick` grid, it eliminates fractional clock-cycle offsets and allows clean downsampling downstream.
 
+# 10. Mixer
+
+The **Mixer** module combines the 16-bit signed audio streams from all active voice modules into a single mono stream. The volume of each voice is scaled inside the individual `Voice` components before reaching the mixer; the mixer itself does not scale volume, providing only gating (muting) functionality.
+
+### IO Bundle
+
+```scala
+val io = new Bundle {
+  val inputs    = Vec(slave(Flow(SInt(16 bits))), numVoices)
+  val mixerCtrl = in Bits(8 bits)
+  val phaseTick = in Bool()
+  val sampleOut = master(Flow(SInt(16 bits)))
+}
+```
+
+### Summing & Gating Logic
+1. **Active Gating (Muting)**: 
+   The mixer iterates through all input channels. If the corresponding bit in `mixerCtrl(v)` is `1`, the input payload is forced to `0`. If `mixerCtrl(v)` is `0` and the input flow is valid, the voice payload is mapped directly.
+2. **Intermediate Accumulator**:
+   To prevent overflow during summation, the inputs are scaled to an intermediate accumulator with guard bits:
+   $$\text{accWidth} = 16 + \lceil\log_2(\text{numVoices})\rceil$$
+   ```scala
+   val acc = SInt(accWidth bits)
+   acc := activeInputs.map(_.resize(accWidth)).reduce(_ + _)
+   ```
+3. **Saturating Clamp**:
+   Before updating the output register, the accumulator value is manually clamped to standard signed 16-bit limits to avoid wrap-around clipping:
+   ```text
+   if acc > 32767:
+       saturated := 32767
+   else if acc < -32768:
+       saturated := -32768
+   else:
+       saturated := acc
+   ```
+
+### Output Timing & Latency
+* **Register Buffering**: The saturated sum is registered on the active input valid strobe. The output `valid` flag is registered on the `phaseTick` strobe.
+* **Latency**: This introduces exactly 1 sample (1 `phaseTick` cycle) of pipeline latency, matching the system's modular latency patterns.
+
 ---
 
-# 9. Decimator
+# 11. Decimator
 
 ### IO Bundle
 
@@ -950,7 +1052,7 @@ valid communicates that a new 48 kHz sample is available now.
 
 ---
 
-# 10. I2STransmitter
+# 12. I2STransmitter
 
 ### IO Bundle
 
@@ -983,7 +1085,7 @@ The serializer uses the scheduled timing subpattern:
 
 to generate the required average I²S bit timing.
 
-## 10.1 Gated Startup and Idle State
+## 12.1 Gated Startup and Idle State
 
 The transmitter employs a gated startup mechanism to ensure that 
 the I2S clock and data lines only toggle when valid audio data is present.
@@ -1007,22 +1109,22 @@ to the `valid` signal to prevent drift.
 
 ---
 
-# 11. Common Package
+# 13. Common Package
 
 The `synth.common` package puts the common goods of the code base into one centralized place. It contains shared types, bundle structures, constants, and pre-calculated ROM lookup arrays. This helps reducing code redundancy and makes the code easier to understand and maintain.
 
 ---
 
-## 11.1 Types and Configuration Bundles (`Types.scala`)
+## 13.1 Types and Configuration Bundles (`Types.scala`)
 
 The `Types.scala` file defines case classes and bundles used for internal bus transactions, component configuration, and inter-module signal routing.
 
-### 11.1.1 Bus Communication Types
+### 13.1.1 Bus Communication Types
 * **`RegisterWrite`**: Represents a decoded write transaction on the control bus.
   * `address`: `UInt(8 bits)` — The target register offset.
   * `data`: `Bits(8 bits)` — The 8-bit parameter payload.
 
-### 11.1.2 Module Configuration Bundles
+### 13.1.2 Module Configuration Bundles
 To avoid routing cluttered individual control wires throughout the top-level entity, settings from the `RegisterBank` are packaged into unified configuration bundles:
 
 * **`OscConfig`**: Routes parameters from the UART registers to the Oscillator.
@@ -1040,28 +1142,28 @@ To avoid routing cluttered individual control wires throughout the top-level ent
   * `cutoff`: `UInt(8 bits)` — Filter cutoff frequency.
   * `resonance`: `UInt(8 bits)` — Filter resonance feedback strength.
 
-### 11.1.3 Internal Audio Routing Bundles
+### 13.1.3 Internal Audio Routing Bundles
 * **`OscWaveforms`**: Routes individual generated waveforms from `Generators` to the output `Mux` combinational logic:
   * `saw` / `square` / `pwm` / `tri`: `SInt(16 bits)`.
 
-### 11.1.4 Envelope Generator FSM Constants
+### 13.1.4 Envelope Generator FSM Constants
 * **`EnvelopeStage`**: An object defining integer constants representing active FSM phases:
   * `IDLE` = 0, `ATTACK` = 1, `DECAY` = 2, `SUSTAIN` = 3, `RELEASE` = 4.
 
 ---
 
-## 11.2 Centralized Memory Data (`RomData.scala`)
+## 13.2 Centralized Memory Data (`RomData.scala`)
 
 The `RomData` object centralizes the mathematical modeling and pre-calculated data for all lookup tables in `spinalSynth`. It generates pure Scala sequences (`Seq[BigInt]`), decoupling DSP calculations from physical hardware bit-widths.
 
-### 11.2.1 Envelope Rate LUT (`envelopeRateLut`)
+### 13.2.1 Envelope Rate LUT (`envelopeRateLut`)
 Generates 256 logarithmic time-duration-to-phase-increment coefficients mapped between 0.5 ms and 30.0 s at a 24 MHz master clock:
 ```text
 t(p) = 0.0005 * (30.0 / 0.0005)^(p / 255)
 envelopeRateLut(p) = round(2^32 / (t(p) * 24_000_000))
 ```
 
-### 11.2.2 Envelope Shaper Curve LUTs (257 entries each)
+### 13.2.2 Envelope Shaper Curve LUTs (257 entries each)
 To support hybrid 8+2 bit interpolation, each curve contains 257 entries, with index 256 acting as the terminal boundary limit to prevent overflow:
 
 * **Linear LUT** (`linearCurveLut`):
@@ -1084,7 +1186,7 @@ To support hybrid 8+2 bit interpolation, each curve contains 257 entries, with i
   y(x) = round(255 * (1 - cos(pi * factor)) / 2)
   ```
 
-### 11.2.3 Filter Coefficient Mapping LUTs (256 entries each)
+### 13.2.3 Filter Coefficient Mapping LUTs (256 entries each)
 * **Exponential Cutoff** (`filterCutoffLut`): Maps user-facing cutoff values (0 to 255) exponentially to 12-bit coefficient steps (10 to 4095):
   ```text
   k(p) = round(10 * (4095 / 10)^(p / 255))
@@ -1096,7 +1198,7 @@ To support hybrid 8+2 bit interpolation, each curve contains 257 entries, with i
 
 ---
 
-## 11.3 Integration in Hardware Modules
+## 13.3 Integration in Hardware Modules
 
 Modules instantiate their own local memories for physical routing, but initialize them using `RomData` sequences mapped to hardware types:
 

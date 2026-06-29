@@ -8,48 +8,57 @@
 4. Master Clock
 5. Timing Generators
 6. Communication Protocol
-7. Oscillator
-   - 7.1 System Architecture
-   - 7.2 Timing & Control
-     - 7.2.1 DDS Update Rate
-     - 7.2.2 Atomic Multi-Byte Frequency Updates
-   - 7.3 Submodules
-     - 7.3.1 Oscillator (Top-Level Wrapper)
-     - 7.3.2 Accumulator
-     - 7.3.3 Generators
-     - 7.3.4 Noise
-     - 7.3.5 Mux
-   - 7.4 Types and Widths
-   - 7.5 Oscillator Register Map
-8. Envelope Generator
-   - 8.1 EnvelopeGenerator: Top-Level Wrapper
-   - 8.2 EnvelopeCtrl
-     - 8.2.1 ADSR & Playback Modes
-     - 8.2.2 Gate ON/OFF and Hard Sync
-     - 8.2.3 State Machine
-     - 8.2.4 AD(S)R Lengths: Time Duration Mapping
-   - 8.3 EnvelopeAccumulator
-   - 8.4 EnvelopeShaper
-     - 8.4.1 ROM Lookup tables
-     - 8.4.2 Hybrid 8+2 Bit Interpolation Math
-     - 8.4.3 Multiplierless Shift-Add Implementation
-9. Attenuation & Volume Control
-10. Filter (State Variable Filter)
-    - 10.1 Architecture
-    - 10.2 Timing
-    - 10.3 Modules
-      - 10.3.1 SVF (Top-Level Wrapper)
-      - 10.3.2 Filter Core
-      - 10.3.3 Filter Mux
-      - 10.3.4 Parameter Mapper
-    - 10.4 Types and Widths
-    - 10.5 Control Signals
-    - 10.6 Filter Register Map
-11. Oversampling and Decimation
-12. Audio Sample Format
-13. I²S Output Interface
-14. Numeric Formats
-15. System Parameters
+7. Voice Component
+   - 7.1 Voice Architecture
+   - 7.2 Multi-Voice Instantiation
+     - 7.2.1 Hardware Instantiation
+     - 7.2.2 Aligned Register Address Mapping
+8. Oscillator
+   - 8.1 System Architecture
+   - 8.2 Timing & Control
+     - 8.2.1 DDS Update Rate
+     - 8.2.2 Atomic Multi-Byte Frequency Updates
+   - 8.3 Submodules
+     - 8.3.1 Oscillator (Top-Level Wrapper)
+     - 8.3.2 OscAccumulator
+     - 8.3.3 OscGenerators
+     - 8.3.4 OscNoise
+     - 8.3.5 OscMux
+   - 8.4 Types and Widths
+   - 8.5 Oscillator Register Map
+9. Envelope Generator
+   - 9.1 EnvelopeGenerator: Top-Level Wrapper
+   - 9.2 EnvelopeCtrl
+     - 9.2.1 ADSR & Playback Modes
+     - 9.2.2 Gate ON/OFF and Hard Sync
+     - 9.2.3 State Machine
+     - 9.2.4 AD(S)R Lengths: Time Duration Mapping
+   - 9.3 EnvelopeAccumulator
+   - 9.4 EnvelopeShaper
+     - 9.4.1 ROM Lookup tables
+     - 9.4.2 Hybrid 8+2 Bit Interpolation Math
+     - 9.4.3 Multiplierless Shift-Add Implementation
+10. Attenuation & Volume Control
+11. Filter (State Variable Filter)
+    - 11.1 Architecture
+    - 11.2 Timing
+    - 11.3 Modules
+      - 11.3.1 SVF (Top-Level Wrapper)
+      - 11.3.2 Filter Core
+      - 11.3.3 Filter Mux
+      - 11.3.4 Parameter Mapper
+    - 11.4 Types and Widths
+    - 11.5 Control Signals
+    - 11.6 Filter Register Map
+12. Master Mixer
+    - 12.1 Mixer Architecture
+    - 12.2 Summing and Saturation Math
+    - 12.3 Global Mixer Control Register Map
+13. Oversampling and Decimation
+14. Audio Sample Format
+15. I²S Output Interface
+16. Numeric Formats
+17. System Parameters
 
 Appendices
 - Appendix A: Notes and Oscillator Frequency Words Reference
@@ -69,7 +78,7 @@ Appendices
 
 This project implements a compact digital audio synthesizer in SpinalHDL.
 
-The core design integrates an oversampled Direct Digital Synthesis (DDS) oscillator, a flexible ADSR envelope generator, a multi-mode State Variable Filter (SVF), and a volume attenuator — all configurable at runtime over a UART register interface. The system produces 16-bit stereo audio serialized using the I²S protocol.
+The core design is structured as a polyphonic architecture containing parameterized independent voice channels and a Master Mixer. Each voice integrates an oversampled Direct Digital Synthesis (DDS) oscillator, a flexible ADSR envelope generator, a multi-mode State Variable Filter (SVF), and double volume attenuators (dynamic and static). The voice outputs are dynamically summed, saturated, and gated inside the Master Mixer. All configurations are modified at runtime over a UART register interface. The system produces 16-bit stereo audio serialized using the I²S protocol.
 
 The project is intentionally designed to remain:
 
@@ -82,10 +91,12 @@ The project is intentionally designed to remain:
 
 ## Features
 
-- **24-bit DDS Oscillator**: Generates Saw, Square, PWM, Triangle, and Noise waveforms with 10× oversampling (480 kHz internal update rate downsampled to 48 kHz).
-- **Flexible ADSR Envelope**: Supports dynamic rate mapping, four wave-shaping lookup curves (Linear, Exponential, Logarithmic, S-Curve), looping LFO mode, and hardware/software hard-sync prioritization.
-- **State Variable Filter (SVF)**: Multi-mode Chamberlin filter (LP, BP, HP) with exponential cutoff and quadratic resonance mapping, state saturation protection, and cycle-accurate processing frame synchronization.
-- **Control Subsystem**: UART command decoder supporting 3-byte command packets (`WriteRegister`) for dynamic runtime configuration of all parameters.
+- **Polyphonic Voice Architecture**: Supports a parameterized number of independent synth voices (default is 1, instantiated as 2 in main design) running in parallel.
+- **24-bit DDS Oscillator**: Generates Saw, Square, PWM, Triangle, and Noise waveforms with 10× oversampling (480 kHz internal update rate downsampled to 48 kHz). Included in each voice.
+- **Flexible ADSR Envelope**: Supports dynamic rate mapping, four wave-shaping lookup curves (Linear, Exponential, Logarithmic, S-Curve), looping LFO mode, and hardware/software hard-sync prioritization. Included in each voice.
+- **State Variable Filter (SVF)**: Multi-mode Chamberlin filter (LP, BP, HP) with exponential cutoff and quadratic resonance mapping, state saturation protection, and cycle-accurate processing frame synchronization. Included in each voice.
+- **Master Mixer**: Sums up to 7 voice streams with dynamic guard bits, manual saturation clamping (`-32768` to `32767`), and independent active-low voice muting controls.
+- **Control Subsystem**: UART command decoder supporting 3-byte command packets (`WriteRegister`) for dynamic runtime configuration of all parameters using parameterized register boundaries and voice-relative address offsets.
 - **Timing & Output**: Single synchronous 24 MHz clock domain using clock-enable based timing generators and serialized stereo 16-bit signed I²S audio output.
 
 ## AI: ChatGPT and Gemini
@@ -101,49 +112,98 @@ Later on, i switched the IDE to Antigravity and started paying for Gemini Access
 
 # 2. High-Level Architecture
 
+The system's high-level architecture is organized hierarchically. The top-level wrapper handles communication decoding, clock-enable synchronization, voice mixing, and audio serialization. Each voice manages its own DSP synthesis, modulation, and filtering blocks.
+
+### 2.1 Top-Level Architecture
+
 ```text
 External Interface (24MHz Clk, Reset, UART Rx)
-          ↓
-        Synth (Unified Top Module)
-          ↓
-┌───────────────────────────────────────────────┐
-│  UART Subsystem (synth.uart)                  │
-│  [Uart]                                       │
-│    └─ [UartRx] → [Decoder] → [RegisterBank]   │
-└───────────────┬───────────────────────────────┘
-                 │ oscConfig: OscConfig, envConfig: EnvelopeConfig
-                ↓
-┌───────────────────────────────────────────────┐
-│  Synthesis, Modulation & Mixing (480 kHz)      │
-│  [TimingGenerator] (synth.timing)             │
-│      ├───────────────────────────────────┐    │
-│      ↓                                   ↓    │
-│  [Oscillator]                      [EnvelopeGenerator]
-│      ↓                                   │    │
-│  [envAttenuator] (10-bit Envelope) <─────┘    │
-│      ↓                                        │
-│  [attenuator] (8-bit Master Volume)           │
-└───────────────┬───────────────────────────────┘
-                │ (480 kHz Attenuated Samples)
-                ↓
-┌───────────────────────────────────────────────┐
-│  State Variable Filter (synth.filter)         │
-│  [SVF]                                        │
-└───────────────┬───────────────────────────────┘
-                │ (480 kHz Filtered Samples)
-                ↓
-┌───────────────────────────────────────────────┐
-│  Oversampling Decimation                      │
-│  [Decimator]  (synth.output)                  │
-└───────────────┬───────────────────────────────┘
-                │ (48 kHz Output Samples)
-                ↓
-┌───────────────────────────────────────────────┐
-│  I2S Transmitter (synth.output)               │
-│  [BCLK] [LRCLK] [SDATA]                       │
-└───────────────────────────────────────────────┘
-                ↓
-       Stereo Digital Audio
+                     │
+                     ▼
+         Synth (Unified Top Module)
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  ┌────────────────────────┐                                     │
+  │  │ UART Subsystem         │        synthConfig (mixerCtrl)      │
+  │  │ [Uart]                 │─────────────────────────────────┐   │
+  │  │  └─ [RegisterBank]     │                                 │   │
+  │  └─────┬──────────────┬───┘                                 │   │
+  │        │              │ voiceConfig(0..N-1)                 │   │
+  │        │              └─────────────────────────┐           │   │
+  │        │                                        │           │   │
+  │        ▼                                        ▼           │   │
+  │  ┌────────────────────────┐               ┌───────────┐     │   │
+  │  │ Timing Generator       │               │  Voices   │     │   │
+  │  │ [TimingGenerator]      │               │  [Voice]  │     │   │
+  │  │  ├─ phaseTick (480kHz) ┼──────────────>│  (x0, x1) │     │   │
+  │  │  └─ sampleTick (48kHz) ┼──────┐        └─────┬─────┘     │   │
+  │  └────────────────────────┘      │              │           │   │
+  │                                  │              │ voiceOuts │   │
+  │                                  │              ▼           │   │
+  │                                  │        ┌───────────┐     │   │
+  │                                  │        │ Master    │     │   │
+  │                                  │        │ Mixer     │ <───┘   │
+  │                                  │        │ [Mixer]   │         │
+  │                                  │        └─────┬─────┘         │
+  │                                  │              │ (480 kHz Sum) │
+  │                                  │              ▼               │
+  │                                  │        ┌───────────┐         │
+  │                                  │        │ Decimator │         │
+  │                                  └───────>│[Decimator]│         │
+  │                                           └─────┬─────┘         │
+  │                                                 │ (48 kHz Samples)
+  │                                                 ▼               │
+  │                                           ┌───────────┐         │
+  │                                           │    I2S    │         │
+  │                                           │Transmitter│         │
+  │                                           └─────┬─────┘         │
+  │                                                 │               │
+  └─────────────────────────────────────────────────┼───────────────┘
+                                                    ▼
+                                           Stereo Digital Audio
+                                         [BCLK] [LRCLK] [SDATA]
+```
+
+### 2.2 Voice-Level Architecture
+
+```text
+Inputs (phaseTick, syncIn, voiceConfig)
+                     │
+                     ▼
+         Voice (Modular Voice Wrapper)
+  ┌──────────────────────────────────────────────────────────────┐
+  │                                                              │
+  │  ┌───────────────────────────────────┐                       │
+  │  │  Synthesis & Modulation (480kHz)  │                       │
+  │  │                                   │                       │
+  │  │  ┌──────────────┐                 │                       │
+  │  │  │ Oscillator   │                 │                       │
+  │  │  │ [Oscillator] ├───┐             │                       │
+  │  │  └──────────────┘   │             │                       │
+  │  │                     ▼             │                       │
+  │  │  ┌──────────────┐  ┌────────────┐ │                       │
+  │  │  │   Envelope   │  │  Envelope  │ │                       │
+  │  │  │  Generator   ├─>│Attenuator  │ │                       │
+  │  │  │[EnvelopeGen] │  │(10-bit scale)│                       │
+  │  │  └──────────────┘  └─────┬──────┘ │                       │
+  │  │                         ▼         │                       │
+  │  │                   ┌────────────┐  │                       │
+  │  │                   │   Master   │  │                       │
+  │  │                   │ Attenuator │  │                       │
+  │  │                   │(8-bit scale)  │                       │
+  │  │                   └─────┬──────┘  │                       │
+  │  └─────────────────────────┼─────────┘                       │
+  │                            │ (480 kHz Bypassed/Scaled Audio) │
+  │                            ▼                                 │
+  │  ┌──────────────────────────────────┐                        │
+  │  │  State Variable Filter (480kHz)  │                        │
+  │  │  [SVF]                           │                        │
+  │  └─────────────────────────┬────────┘                        │
+  │                            │                                 │
+  └────────────────────────────┼─────────────────────────────────┘
+                               ▼
+                        Voice Output Flow
+                          (to Mixer)
 ```
 
 <div class="page-break"></div>
@@ -166,6 +226,9 @@ Synth
  │           ├── UartProtocolDecoder
  │           └── RegisterBank
  │
+ ├── voice/ (Voice Abstraction Layer)
+ │     └── Voice
+ │
  ├── oscillator/ (Sound Generating Engine)
  │     └── Oscillator
  │           ├── Accumulator
@@ -179,8 +242,9 @@ Synth
  │           ├── EnvelopeAccumulator
  │           └── EnvelopeShaper
  │ 
- ├── mixing/ (Audio Processing)
- │     └── Attenuator (Volume Control)
+ ├── mixing/ (Audio Processing & Summing)
+ │     ├── Attenuator (Volume Control)
+ │     └── Mixer (Master Mixer)
  │
  ├── filter/ (State Variable Filter)
  │     └── SVF 
@@ -274,15 +338,62 @@ Right now there is only one command.
 
 ---
 
-# 7. Oscillator
+# 7. Voice Component
 
-The **Oscillator** is the core sound-generating engine of `spinalSynth`, designed around a oversampled Direct Digital Synthesis (DDS) architecture. It generates five standard audio waveforms (Sawtooth, Square, PWM, Triangle, and pseudo-random Noise) at an internal sampling rate of 480 kHz. The output is an 16-bit audio sample flow stream.
+A single **Voice** is a basic playable sound generator module in spinalSynth. It has a configuration port as inputs and generates an audio flow output. The configuration can be mapped to registers and direct inputs.
+
+## 7.1 Voice Architecture
+
+Each Voice instance contains:
+1. **Oscillator**: Direct Digital Synthesis (DDS) waveform generator.
+2. **Envelope Generator**: 10-bit ADSR control modulator.
+3. **Envelope Attenuator**: 10-bit volume scaler driven dynamically by the envelope.
+4. **Master Attenuator**: 8-bit static volume controller.
+5. **State Variable Filter (SVF)**: Multi-mode filter core.
+
+The submodules are wired sequentially to form the voice signal chain:
+```text
+  Oscillator ──> envAttenuator ──> attenuator ──> SVF (or bypass) ──> sampleOut
+                      ▲
+                      │ (10-bit envelope)
+               EnvelopeGenerator
+```
+
+## 7.2 Multi-Voice Instantiation
+
+### 7.2.1 Hardware Instantiation
+To support polyphony, the top-level `Synth` module instantiates multiple voices in parallel using a parameterized Scala loop:
+```scala
+val voices = Seq.tabulate(numVoices)(v => new Voice())
+```
+This generates duplicate, isolated hardware blocks for each voice. The audio singals from the multiple voices get mixed together in a later stage of the spinalSynth (Master Mixer).
+
+### 7.2.2 Aligned Register Address Mapping
+To control each voice independently over the 8-bit UART protocol, the `RegisterBank` allocates a dedicated 32-byte address window per voice starting at base address `0x10`:
+```text
+Voice Base Address = 0x10 + (v * 0x20)
+```
+* **Voice 0**: Occupies addresses `0x10` through `0x2F` (base `0x10`).
+* **Voice 1**: Occupies addresses `0x30` through `0x4F` (base `0x30`).
+...
+* **Voice x**: Occupies addresses `0x10 + (x * 0x20)` through `0x10 + (x * 0x20) + 0x1F` (base `0x10 + (x * 0x20)`).
+
+Inside each base window, the relative offsets for parameters are hardcoded and identical:
+* `+ 0x05` to `+ 0x0A`: Oscillator configuration (Frequency, Wave Select, PWM, Volume).
+* `+ 0x0D` to `+ 0x12`: Envelope configuration (Control, Attack, Decay, Sustain, Release, Gate).
+* `+ 0x15` to `+ 0x18`: Filter configuration (Control, Mode, Cutoff, Resonance).
+
+---
+
+# 8. Oscillator
+
+The **Oscillator** is the core sound-generating engine, designed around a oversampled Direct Digital Synthesis (DDS) architecture. It generates five standard audio waveforms (Sawtooth, Square, PWM, Triangle, and pseudo-random Noise) at an internal sampling rate of 480 kHz. The output is an 16-bit audio sample flow stream.
 
 The design relies entirely on fixed-point arithmetic, pre-calculated Lookup ROMs, to keep it resource friendly for both FPGA and ASIC targets.
 
 ---
 
-## 7.1 System Architecture
+## 8.1 System Architecture
 
 The architecture consists of four submodules: `Accumulator`, `Generators`, `Noise`, and `Mux`. The diagram below illustrates the connection mapping:
 
@@ -316,9 +427,9 @@ waveSelect --->|        |      Mux       |            |
 
 ---
 
-## 7.2 Timing & Control
+## 8.2 Timing & Control
 
-### 7.2.1 DDS Update Rate
+### 8.2.1 DDS Update Rate
 The oscillator operates inside the oversampled clock grid driven by the timing generator. 
 
 - **Internal Phase Update Rate:** 480 kHz (`phaseTick` boundary)
@@ -327,7 +438,7 @@ The oscillator operates inside the oversampled clock grid driven by the timing g
 
 All internal registers update precisely on the rising clock edge when `phaseTick` is active.
 
-### 7.2.2 Atomic Multi-Byte Frequency Updates
+### 8.2.2 Atomic Multi-Byte Frequency Updates
 Since the 24-bit frequency word (`freqWord`) is configured over the 8-bit UART communication protocol, updates must be performed atomically to prevent transient audio pitch glitches:
 1. **OSC_FREQ_LOW (0x30):** Stages the lower 8 bits in a temporary shadow register.
 2. **OSC_FREQ_MID (0x31):** Stages the middle 8 bits in a temporary shadow register.
@@ -337,12 +448,12 @@ Since the 24-bit frequency word (`freqWord`) is configured over the 8-bit UART c
 
 ---
 
-## 7.3 Submodules
+## 8.3 Submodules
 
-### 7.3.1 Oscillator (Top-Level Wrapper)
+### 8.3.1 Oscillator (Top-Level Wrapper)
 The top-level `Oscillator` component instantiates the submodules and coordinates the input control signals (`config`, `phaseTick`) and output data flows. It packages the selected waveform sample into a SpinalHDL `Flow[SInt]` interface, where `valid` is tied directly to `phaseTick`.
 
-### 7.3.2 OscAccumulator
+### 8.3.2 OscAccumulator
 The `OscAccumulator` implements the phase integration logic. At every clock cycle where `phaseTick` is asserted:
 ```text
 phaseReg := phaseReg + freqWord
@@ -363,7 +474,7 @@ The minimum frequency resolution step size is:
 f_step = 480,000 / 16,777,216 ≈ 0.0286 Hz
 ```
 
-### 7.3.3 OscGenerators
+### 8.3.3 OscGenerators
 The `OscGenerators` module contains purely combinational mathematical transformations that convert the 24-bit phase input into various bipolar waveform shapes in a signed 16-bit (`SInt`) range.
 
 #### Sawtooth Waveform
@@ -402,7 +513,7 @@ else:
 tri = (triReflected[22:7] ^ 0x8000)
 ```
 
-### 7.3.4 OscNoise
+### 8.3.4 OscNoise
 The `OscNoise` generator implements a 23-bit pseudo-random Fibonacci Linear Feedback Shift Register (LFSR) updating on every `phaseTick` to avoid digital correlation loops.
 
 - **Polynomial:** $x^{23} + x^{18} + 1$
@@ -410,7 +521,7 @@ The `OscNoise` generator implements a 23-bit pseudo-random Fibonacci Linear Feed
 - **Reset Seed:** `1` (Non-zero initialization prevents lock-up)
 - **Output:** Extracted from the upper 16 bits of the LFSR (`lfsr[22:7]`) cast to a signed integer.
 
-### 7.3.5 OscMux
+### 8.3.5 OscMux
 The `OscMux` is a combinational output selector controlled by the 3-bit `waveSelect` register. It routes the chosen sample to the top-level module:
 
 | waveSelect | Selected Waveform |
@@ -424,7 +535,7 @@ The `OscMux` is a combinational output selector controlled by the 3-bit `waveSel
 
 ---
 
-## 7.4 Types and Widths
+## 8.4 Types and Widths
 
 | Item | Type | Width | Description |
 | :--- | :--- | :---: | :--- |
@@ -441,22 +552,22 @@ The `OscMux` is a combinational output selector controlled by the 3-bit `waveSel
 
 ---
 
-## 7.5 Oscillator Register Map
+## 8.5 Oscillator Register Map
 
 The following registers are mapped into the `spinalSynth` bus to control the Oscillator parameters:
 
-| Register Address (Hex) | Register Name | Bit Width | Description |
-| :--- | :--- | :---: | :--- |
-| `0x30` | `OSC_FREQ_LOW` | 8 bits | Frequency Word Bits `[7:0]` (Lower byte of 24-bit DDS step) |
-| `0x31` | `OSC_FREQ_MID` | 8 bits | Frequency Word Bits `[15:8]` (Middle byte of 24-bit DDS step) |
-| `0x32` | `OSC_FREQ_HIGH` | 8 bits | Frequency Word Bits `[23:16]` (Upper byte of 24-bit DDS step; commit trigger) |
-| `0x33` | `OSC_WAVE_SEL` | 8 bits | Active waveform selection index (`0`=Saw, `1`=Square, `2`=PWM, `3`=Triangle, `4`=Noise) |
-| `0x34` | `OSC_PWM_WIDTH` | 8 bits | PWM duty cycle control value (scaled dynamically to 24-bit comparison range) |
-| `0x35` | `OSC_VOLUME` | 8 bits | Master output volume / output attenuation |
+| Offset | Voice 0 Abs (Hex) | Voice 1 Abs (Hex) | Register Name | Bit Width | Description |
+| :---: | :---: | :---: | :--- | :---: | :--- |
+| `0x05` | `0x15` | `0x35` | `OSC_FREQ_LOW` | 8 bits | Frequency Word Bits `[7:0]` (Lower byte of 24-bit DDS step) |
+| `0x06` | `0x16` | `0x36` | `OSC_FREQ_MID` | 8 bits | Frequency Word Bits `[15:8]` (Middle byte of 24-bit DDS step) |
+| `0x07` | `0x17` | `0x37` | `OSC_FREQ_HIGH` | 8 bits | Frequency Word Bits `[23:16]` (Upper byte of 24-bit DDS step; commit trigger) |
+| `0x08` | `0x18` | `0x38` | `OSC_WAVE_SEL` | 8 bits | Active waveform selection index (`0`=Saw, `1`=Square, `2`=PWM, `3`=Triangle, `4`=Noise) |
+| `0x09` | `0x19` | `0x39` | `OSC_PWM_WIDTH` | 8 bits | PWM duty cycle control value (scaled dynamically to 24-bit comparison range) |
+| `0x0A` | `0x1A` | `0x3A` | `OSC_VOLUME` | 8 bits | Voice oscillator output volume / output attenuation |
 
 ---
 
-# 8. Envelope Generator
+# 9. Envelope Generator
 
 The **Envelope Generator** is a control module designed to shape the volume (amplitude) or other modulation parameters of a sound over time. The general design principle is an ADSR engine.
 
@@ -468,7 +579,7 @@ The entire module is designed with ASIC portability in mind, meaning it uses no 
 
 ---
 
-## 8.1 EnvelopeGenerator: Top-Level Wrapper
+## 9.1 EnvelopeGenerator: Top-Level Wrapper
 
 The top-level `EnvelopeGenerator` module integrates the submodules and registers them to the system communication and audio pipelines.
 
@@ -532,24 +643,24 @@ case class EnvelopeConfig() extends Bundle {
 ### Register Map
 The following registers are mapped into the `spinalSynth` SPI/UART register bus to control the Generator parameters:
 
-| Register Address (Hex) | Register Name | Bit Width | Description |
-| :--- | :--- | :---: | :--- |
-| `0x40` | `ENV_CTRL` | 8 bits | Control bits: <br> `[0]` `ENV_DISABLE` (`0`=active/enabled, `1`=disabled), <br> `[1]` `ENV_BYPASS` (`0`=active modulation, `1`=bypass modulation), <br> `[2]` `ENV_LOOP` (`0`=single-shot, `1`=loop), <br> `[3]` `ENV_HARDSYNC_EN` (`0`=hard sync disabled, `1`=hard sync enabled), <br> `[5:4]` `ENV_CURVE` (`00`=Lin, `01`=Exp, <br> `10`=Log, `11`=S-Curve) |
-| `0x41` | `ENV_ATTACK` | 8 bits | Attack rate (time duration mapped) |
-| `0x42` | `ENV_DECAY` | 8 bits | Decay rate (time duration mapped) |
-| `0x43` | `ENV_SUSTAIN` | 8 bits | Sustain Level |
-| `0x44` | `ENV_RELEASE` | 8 bits | Release rate (time duration mapped)|
-| `0x45` | `ENV_GATE` | 8 bits | Gate/Sync triggers: <br> `[0]` Gate ON/OFF, <br> `[1]` Software Hard Sync |
+| Offset | Voice 0 Abs (Hex) | Voice 1 Abs (Hex) | Register Name | Bit Width | Description |
+| :---: | :---: | :---: | :--- | :---: | :--- |
+| `0x0D` | `0x1D` | `0x3D` | `ENV_CTRL` | 8 bits | Control bits: <br> `[0]` `ENV_DISABLE` (`0`=active/enabled, `1`=disabled), <br> `[1]` `ENV_BYPASS` (`0`=active modulation, `1`=bypass modulation), <br> `[2]` `ENV_LOOP` (`0`=single-shot, `1`=loop), <br> `[3]` `ENV_HARDSYNC_EN` (`0`=hard sync disabled, `1`=hard sync enabled), <br> `[5:4]` `ENV_CURVE` (`00`=Lin, `01`=Exp, <br> `10`=Log, `11`=S-Curve) |
+| `0x0E` | `0x1E` | `0x3E` | `ENV_ATTACK` | 8 bits | Attack rate (time duration mapped) |
+| `0x0F` | `0x1F` | `0x3F` | `ENV_DECAY` | 8 bits | Decay rate (time duration mapped) |
+| `0x10` | `0x20` | `0x40` | `ENV_SUSTAIN` | 8 bits | Sustain Level |
+| `0x11` | `0x21` | `0x41` | `ENV_RELEASE` | 8 bits | Release rate (time duration mapped) |
+| `0x12` | `0x22` | `0x42` | `ENV_GATE` | 8 bits | Gate/Sync triggers: <br> `[0]` Gate ON/OFF, <br> `[1]` Software Hard Sync |
 
 Bits that do not appear in the mapping above are just unused right now.
 
 ---
 
-## 8.2 EnvelopeCtrl
+## 9.2 EnvelopeCtrl
 
 `EnvelopeCtrl` is the state machine and synchronization module that determines the active phase increment values and the play direction.
 
-### 8.2.1 ADSR & Playback Modes
+### 9.2.1 ADSR & Playback Modes
 There are different modes for the ADSR playback envelopes and shapes:
 * **Normal (One-Shot):** Triggers on Gate ON, transitions from Attack to Decay to Sustain, and goes to Release on Gate OFF.
 * **Looping (LFO Mode):** The envelope automatically loops back to the start of the Attack phase once the Decay phase finishes.
@@ -572,14 +683,14 @@ There are different modes for the ADSR playback envelopes and shapes:
 
 ```
 
-### 8.2.2 Gate ON/OFF and Hard Sync
+### 9.2.2 Gate ON/OFF and Hard Sync
 * **Gate ON:** Triggers the ADSR envelope to start from the ATTACK phase.
 * **Gate OFF:** Triggers the ADSR envelope to go to the RELEASE phase.
 * **Hard Sync:** Trigger to instantly reset the Accumulator and send the state machine to ATTACK.
 
 For the exact transitions see the state machine diagram below.
 
-### 8.2.3 State Machine
+### 9.2.3 State Machine
 
 ```mermaid
 %%{init: { 'themeVariables': { 'fontSize': '18px' } } }%%
@@ -608,7 +719,7 @@ stateDiagram-v2
 
 ```
 
-### 8.2.4 AD(S)R Lengths: Time Duration Mapping
+### 9.2.4 AD(S)R Lengths: Time Duration Mapping
 In synthesizer design, how parameter values map to actual time durations directly determines the musical feel of the instrument. 
 
 #### Why Linear Mapping Fails
@@ -642,7 +753,7 @@ Mathematical Model:
 
 ---
 
-## 8.3 EnvelopeAccumulator
+## 9.3 EnvelopeAccumulator
 
 The `EnvelopeAccumulator` acts as the time-tracking motor of the envelope generator, capable of counting in both directions (forward and reverse) depending on the active stage.
 
@@ -670,13 +781,13 @@ At the 24 MHz main clock rate with a 32-bit accumulator and 22-bit phase increme
 
 ---
 
-## 8.4 EnvelopeShaper
+## 9.4 EnvelopeShaper
 
 The `EnvelopeShaper` is the output stage of the envelope generator. 
 
 It takes the raw, linear ramp outputs from the accumulator and transforms them into customized, musically natural curves. It reads two consecutive points from a 257-entry curve ROM (Lin, Exp, Log, S-Curve) based on the 8-bit Base Index, performs linear interpolation in pure multiplierless combinational logic using the 2-bit fraction, and outputs unipolar/bipolar audio-rate flows.
 
-### 8.4.1 ROM Lookup tables
+### 9.4.1 ROM Lookup tables
 The Base Index (upper 8 bits) addresses lookup curves from pre-calculated 257-word ROMs (257 x 8 bits) using these profiles:
 
 | Curve Model | Description | Primary Audio Application |
@@ -689,7 +800,7 @@ The Base Index (upper 8 bits) addresses lookup curves from pre-calculated 257-wo
 #### The 257-Entry ROM Boundary Safeguard
 To calculate Y1 = LUT[x+1] when the base index is at its boundary (x = 255) without conditional bounds checking or wrapping, the curve ROM is constructed with **257 entries** (indices 0 to 256). For x = 255, LUT[x+1] safely returns LUT[256], containing the true terminal amplitude value.
 
-### 8.4.2 Hybrid 8+2 Bit Interpolation Math
+### 9.4.2 Hybrid 8+2 Bit Interpolation Math
 Using the splits from the 10 bits accumulator output:
 * The 8-bit Base Index looks up the boundary values Y0 = LUT[x] and Y1 = LUT[x+1].
 * The 2-bit fraction f represents step fractions {0, 1/4, 2/4, 3/4}.
@@ -698,7 +809,7 @@ Using the splits from the 10 bits accumulator output:
   `fractionAdjusted = accumDir ? (3 - fraction) : fraction`
   This guarantees that interpolation sweeps smoothly and linearly downward in both directions.
 
-### 8.4.3 Multiplierless Shift-Add Implementation
+### 9.4.3 Multiplierless Shift-Add Implementation
 The fractional calculation is implemented in pure combinational shift-add logic:
 
 | Fractional Bits (f_adjusted) | Fraction Value | Hardware Shift-Add Expression |
@@ -712,7 +823,7 @@ Since the accumulator physically halts at `sustainLevel` during Sustain and coun
 
 ---
 
-# 9. Attenuation & Volume Control
+# 10. Attenuation & Volume Control
 
 Volume level control is performed at the oversampled 480 kHz rate prior to decimation by the `Attenuator` module. To maximize reusable modularity (e.g., interfacing with an 8-bit manual volume register or a 10-bit dynamic envelope generator output), the `Attenuator` is designed as a compile-time parameterized component:
 
@@ -726,7 +837,7 @@ Volume level control is performed at the oversampled 480 kHz rate prior to decim
 
 ---
 
-# 10. Filter (State Variable Filter)
+# 11. Filter (State Variable Filter)
 
 The Filter Module processes audio samples within the spinalSynth signal path.
 
@@ -734,7 +845,7 @@ The module architecture shall allow future filter core implementations without c
 
 ---
 
-## 10.1 Architecture
+## 11.1 Architecture
 
 ```text id="a1k9qv"
                      +----------------+
@@ -766,7 +877,7 @@ resonance ---------> |                |
 
 ---
 
-## 10.2 Timing
+## 11.2 Timing
 
 ### Main system clock
 
@@ -790,13 +901,13 @@ One frame of the external sample sync is 50 main clock cycles long. Calculations
 
 ---
 
-## 10.3 Modules
+## 11.3 Modules
 
-### 10.3.1 SVF (Top-Level Wrapper)
+### 11.3.1 SVF (Top-Level Wrapper)
 
 `SVF` combines `FilterCore`, `FilterMux`, and `ParameterMapper`, and handles the connection of all input and output signals.
 
-### 10.3.2 Filter Core
+### 11.3.2 Filter Core
 
 `FilterCore` is a Chamberlin State Variable Filter (SVF). It supports runtime adjustment of:
 
@@ -889,7 +1000,7 @@ Arithmetic operations may temporarily increase signal widths. Before values are 
 
 The state registers `lp` and `bp` remain 24 bits wide throughout operation.
 
-### 10.3.3 Filter Mux
+### 11.3.3 Filter Mux
 
 `FilterMux` is responsible for output selection. The initial implementation shall support selection of:
 
@@ -901,7 +1012,7 @@ responses.
 
 It is also responsible for downsizing the internal 24-bit representation back to the 16-bit output. To prevent harsh wrap-around distortion when filter outputs exceed 16-bit signed boundaries (due to filter peaking or phase-shift overshoot), the module shall apply a saturating clamp to output values, limiting output samples strictly to `[-32768, 32767]`.
 
-### 10.3.4 Parameter Mapper
+### 11.3.4 Parameter Mapper
 
 `ParameterMapper` converts user-facing parameters into internal filter coefficients.
 
@@ -921,7 +1032,7 @@ It is also responsible for downsizing the internal 24-bit representation back to
 
 ---
 
-## 10.4 Types and Widths
+## 11.4 Types and Widths
 
 | Item           | Type          |
 | -------------- | ------------- |
@@ -937,7 +1048,7 @@ It is also responsible for downsizing the internal 24-bit representation back to
 
 ---
 
-## 10.5 Control Signals
+## 11.5 Control Signals
 
 | Signal | Type         |
 | ------ | ------------ |
@@ -961,20 +1072,66 @@ Bypass functionality is handled at the toplevel `Synth.scala` multiplexer, routi
 
 ---
 
-## 10.6 Filter Register Map
+## 11.6 Filter Register Map
 
 The following registers are mapped into the `spinalSynth` bus to control the SVF parameters:
 
-| Register Address (Hex) | Register Name | Bit Width | Description |
-| :--- | :--- | :---: | :--- |
-| `0x50` | `FILTER_CTRL` | 8 bits | Bit `[0]`: `FILTER_DISABLE` (`0`=active/enabled, `1`=disabled), <br> Bit `[1]`: `FILTER_BYPASS` (`0`=filter in audio path, `1`=bypass filter) |
-| `0x51` | `FILTER_MODE` | 8 bits | Bits `[1:0]`: Response Mode (`00`=LP, `01`=BP, `10`=HP, `11`=Reserved) |
-| `0x52` | `FILTER_CUTOFF` | 8 bits | 8-bit user cutoff value (mapped exponentially) |
-| `0x53` | `FILTER_RESONANCE` | 8 bits | 8-bit user resonance value (mapped quadratically) |
+| Offset | Voice 0 Abs (Hex) | Voice 1 Abs (Hex) | Register Name | Bit Width | Description |
+| :---: | :---: | :---: | :--- | :---: | :--- |
+| `0x15` | `0x25` | `0x45` | `FILTER_CTRL` | 8 bits | Bit `[0]`: `FILTER_DISABLE` (`0`=active/enabled, `1`=disabled), <br> Bit `[1]`: `FILTER_BYPASS` (`0`=filter in audio path, `1`=bypass filter) |
+| `0x16` | `0x26` | `0x46` | `FILTER_MODE` | 8 bits | Bits `[1:0]`: Response Mode (`00`=LP, `01`=BP, `10`=HP, `11`=Reserved) |
+| `0x17` | `0x27` | `0x47` | `FILTER_CUTOFF` | 8 bits | 8-bit user cutoff value (mapped exponentially) |
+| `0x18` | `0x28` | `0x48` | `FILTER_RESONANCE` | 8 bits | 8-bit user resonance value (mapped quadratically) |
 
 ---
 
-# 11. Oversampling and Decimation
+# 12. Master Mixer
+
+The **Master Mixer** module (`Mixer.scala`) is responsible for combining the audio output flows from all voices into a single audio stream (Mono, 16-bit, 480KHz) prior to decimation. The volumes of the single voices are controlled by a attenuators in the voice components, not in the Master Mixer. The Master Mixer only contains an option to mute voices. 
+
+## 12.1 Mixer Architecture
+
+The mixer is parameterized at compile time:
+* **`numVoices`**: The number of independent voices to sum (supports up to 7 voices).
+* **Inputs**: A vector of SpinalHDL `Flow[SInt]` interfaces, one per voice:
+  ```scala
+  val inputs = Vec(slave(Flow(SInt(16 bits))), numVoices)
+  ```
+* **Mute Control**: Accepts a global `mixerCtrl` byte register from the `RegisterBank`:
+  ```scala
+  val mixerCtrl = in Bits(8 bits)
+  ```
+
+## 12.2 Summing and Saturation Math
+
+### 12.2.1 Accumulator Width Gating
+Summing multiple 16-bit signed audio signals directly can lead to arithmetic overflow. To prevent this, the mixer sums all voice inputs into a wider internal accumulator with width $16 + \lceil\log_2(\text{numVoices})\rceil$ bits:
+```scala
+val accWidth = 16 + log2Up(numVoices)
+val acc = SInt(accWidth bits)
+```
+Voices whose corresponding bit in the `mixerCtrl` register is set to `1` (muted) or whose input `valid` is inactive contribute `0` to the sum.
+
+### 12.2.2 Manual Saturation Clamping
+To convert the wider accumulator back to the 16-bit signed output payload without wrapping distortion, the mixer applies a manual saturating clamp:
+* If the sum exceeds `32767`, it clamps to `32767`.
+* If the sum is below `-32768`, it clamps to `-32768`.
+* Otherwise, the sum is resized directly to 16 bits.
+
+This matches the manual clamping strategy used in the voice volume attenuators to guarantee glitch-free clipping.
+
+### 12.2.3 Output Latency
+The mixed sample output payload is registered at the `phaseTick` rate, introducing exactly 1 sample (1 `phaseTick` cycle) of pipeline latency. The output flow's `valid` flag is gated to pulse only when `phaseTick` is active.
+
+## 12.3 Global Mixer Control Register Map
+
+| Register Address (Hex) | Register Name | Bit Width | Description |
+| :---: | :---: | :---: | :--- |
+| `0x00` | `MIXER_CTRL` | 8 bits | Active-low voice mute mask. Bit `v` corresponds to voice `v`. <br> `0`: Voice `v` is un-muted / ON (default) <br> `1`: Voice `v` is muted / OFF |
+
+---
+
+# 13. Oversampling and Decimation
 
 ## Oversampling Strategy
 
@@ -1016,7 +1173,7 @@ if(sampleTick) {
 
 ---
 
-# 12. Audio Sample Format
+# 14. Audio Sample Format
 
 | Parameter | Value |
 |---|---|
@@ -1043,7 +1200,7 @@ rightSample = sample
 
 ---
 
-# 13. I²S Output Interface
+# 15. I²S Output Interface
 
 The output interface shall use the I²S protocol.
 
@@ -1217,7 +1374,7 @@ The exact serializer state machine behavior is not yet specified.
 
 ---
 
-# 14. Numeric Formats
+# 16. Numeric Formats
 
 | Signal | Type |
 |---|---|
@@ -1242,7 +1399,7 @@ The design shall use fixed-point arithmetic throughout.
 
 ---
 
-# 15. System Parameters
+# 17. System Parameters
 
 | Parameter | Value |
 |---|---|
@@ -1378,21 +1535,24 @@ Here is the Markdown table mapping the Attack/Decay/Release 8-bit register value
 
 The following registers are mapped into the `spinalSynth` bus to control the synthesizer and filter parameters:
 
-| Address | Register Name | Description | Width |
-|---|---|---|---|
-| `0x30` | `OSC_FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
-| `0x31` | `OSC_FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
-| `0x32` | `OSC_FREQ_HIGH` | Frequency Word Bits [23:16] | 8 bit |
-| `0x33` | `OSC_WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
-| `0x34` | `OSC_PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
-| `0x35` | `OSC_VOLUME` | Master output volume / output attenuation | 8 bit |
-| `0x40` | `ENV_CTRL` | Envelope Control: [0] Disable, [1] Bypass, [2] Loop, [3] Hard Sync Enable, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
-| `0x41` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
-| `0x42` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
-| `0x43` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
-| `0x44` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
-| `0x45` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
-| `0x50` | `FILTER_CTRL` | Filter Control: [0] Disable, [1] Bypass | 8 bit |
-| `0x51` | `FILTER_MODE` | Filter response mode: [1:0] Mode (00=LP, 01=BP, 10=HP, 11=Reserved) | 8 bit |
-| `0x52` | `FILTER_CUTOFF` | Cutoff frequency parameter | 8 bit |
-| `0x53` | `FILTER_RESONANCE` | Resonance feedback parameter | 8 bit |
+| Address / Offset | Voice 0 Abs | Voice 1 Abs | Register Name | Description | Width |
+|:---:|:---:|:---:|:---|:---|:---:|
+| **Global Registers** | | | | | |
+| `0x00` | - | - | `MIXER_CTRL` | Master Mixer Control: active-low voice mute mask. Bit `v` mutes voice `v` (`0`=un-muted, `1`=muted). | 8 bit |
+| **Voice Offset Registers** | | | (Relative to base `0x10 + v * 0x20`) | | |
+| `+ 0x05` | `0x15` | `0x35` | `OSC_FREQ_LOW` | Frequency Word Bits [7:0] | 8 bit |
+| `+ 0x06` | `0x16` | `0x36` | `OSC_FREQ_MID` | Frequency Word Bits [15:8] | 8 bit |
+| `+ 0x07` | `0x17` | `0x37` | `OSC_FREQ_HIGH` | Frequency Word Bits [23:16] (Atomic commit trigger) | 8 bit |
+| `+ 0x08` | `0x18` | `0x38` | `OSC_WAVE_SEL` | 0:Saw, 1:Square, 2:PWM, 3:Triangle, 4:Noise | 3 bit |
+| `+ 0x09` | `0x19` | `0x39` | `OSC_PWM_WIDTH` | Duty cycle for PWM waveform | 8 bit |
+| `+ 0x0A` | `0x1A` | `0x3A` | `OSC_VOLUME` | Voice oscillator output volume / output attenuation | 8 bit |
+| `+ 0x0D` | `0x1D` | `0x3D` | `ENV_CTRL` | Envelope Control: [0] Disable, [1] Bypass, [2] Loop, [3] Hard Sync Enable, [5:4] Curve (00=Lin, 01=Exp, 10=Log, 11=S-Curve) | 8 bit |
+| `+ 0x0E` | `0x1E` | `0x3E` | `ENV_ATTACK` | Attack rate coefficient | 8 bit |
+| `+ 0x0F` | `0x1F` | `0x3F` | `ENV_DECAY` | Decay rate coefficient | 8 bit |
+| `+ 0x10` | `0x20` | `0x40` | `ENV_SUSTAIN` | Sustain level (0 to 255) | 8 bit |
+| `+ 0x11` | `0x21` | `0x41` | `ENV_RELEASE` | Release rate coefficient | 8 bit |
+| `+ 0x12` | `0x22` | `0x42` | `ENV_GATE` | Envelope Gate: [0] Gate ON/OFF, [1] Software Hard Sync | 8 bit |
+| `+ 0x15` | `0x25` | `0x45` | `FILTER_CTRL` | Filter Control: [0] Disable, [1] Bypass | 8 bit |
+| `+ 0x16` | `0x26` | `0x46` | `FILTER_MODE` | Filter response mode: [1:0] Mode (00=LP, 01=BP, 10=HP, 11=Reserved) | 8 bit |
+| `+ 0x17` | `0x27` | `0x47` | `FILTER_CUTOFF` | Cutoff frequency parameter | 8 bit |
+| `+ 0x18` | `0x28` | `0x48` | `FILTER_RESONANCE` | Resonance feedback parameter | 8 bit |
