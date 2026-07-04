@@ -19,6 +19,8 @@ class Synth(numVoices: Int = 1) extends Component {
 
     val uartRx   = in Bool()
 
+    val syncIn   = in Bool()
+
     val i2sBclk  = out Bool()
     val i2sLrclk = out Bool()
     val i2sData  = out Bool()
@@ -60,7 +62,7 @@ class Synth(numVoices: Int = 1) extends Component {
     // ------ 1. Tick/Sync Distribution & Routing Loop
     for (v <- 0 until numVoices) {
       voices(v).io.phaseTick       := timingGen.io.phaseTick
-      voices(v).io.syncIn          := False
+      voices(v).io.syncIn          := io.syncIn
       voices(v).io.config          := uart.io.voiceConfig(v)
       mixer.io.inputs(v)           := voices(v).io.sampleOut
     }
